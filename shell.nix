@@ -7,5 +7,5 @@ let
     doCheck = true;
   };
 in pkgs.mkShell {
-  buildInputs = [ sparseMatrix ] ++ (with pkgs; [ cargo cargo-edit ]);
+  buildInputs = [ sparseMatrix ] ++ (with pkgs; [ cargo cargo-edit cargo-flamegraph ]);
 }
