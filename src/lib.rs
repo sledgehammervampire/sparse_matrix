@@ -5,11 +5,12 @@ extern crate quickcheck_macros;
 use num::{traits::NumAssignRef, Num};
 use quickcheck::Arbitrary;
 use rand::prelude::*;
+use rayon::prelude::*;
 use std::{
     borrow::Cow,
     collections::HashMap,
     collections::{BTreeMap, BTreeSet},
-    iter::repeat_with,
+    iter::{repeat_with, Sum},
     ops::{AddAssign, MulAssign},
 };
 
@@ -208,7 +209,7 @@ impl<T: NumAssignRef + Clone> AddAssign<&CSRMatrix<T>> for CSRMatrix<T> {
     }
 }
 
-impl<T: NumAssignRef + Clone + std::fmt::Debug> MulAssign<&CSRMatrix<T>> for CSRMatrix<T> {
+impl<T: NumAssignRef + Sum + Clone> MulAssign<&CSRMatrix<T>> for CSRMatrix<T> {
     fn mul_assign(&mut self, rhs: &CSRMatrix<T>) {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
@@ -238,11 +239,7 @@ impl<T: NumAssignRef + Clone + std::fmt::Debug> MulAssign<&CSRMatrix<T>> for CSR
                                     // t *= rhs.get_element((k, j)).as_ref();
                                     t
                                 })
-                                // T doesn't impl Sum
-                                .fold(T::zero(), |mut s, t| {
-                                    s += t;
-                                    s
-                                });
+                                .sum::<T>();
                             if s.is_zero() {
                                 None
                             } else {
@@ -354,7 +351,7 @@ impl<T: Arbitrary + NumAssignRef> Arbitrary for DOKMatrix<T> {
         let cols = nonzero_arb(g);
         let mut entries = HashMap::new();
         // limit density of matrices to hopefully speed up computation
-        for _ in 0..g.gen_range(0, 1.max(rows * cols / 5)) {
+        for _ in 0..g.gen_range(0, 1.max(rows * cols / 10)) {
             entries.insert((g.gen_range(0, rows), g.gen_range(0, cols)), nonzero_arb(g));
         }
         DOKMatrix {
@@ -373,7 +370,7 @@ impl<T: Arbitrary + NumAssignRef> Arbitrary for AddPair<T> {
     fn arbitrary<G: quickcheck::Gen>(g: &mut G) -> Self {
         let m1 = DOKMatrix::arbitrary(g);
         let (rows, cols) = (m1.rows, m1.cols);
-        let n = g.gen_range(0, 1.max(rows * cols / 5));
+        let n = g.gen_range(0, 1.max(rows * cols / 10));
         let entries =
             repeat_with(|| ((g.gen_range(0, rows), g.gen_range(0, cols)), nonzero_arb(g)))
                 .take(n)
@@ -397,7 +394,7 @@ impl<T: Arbitrary + NumAssignRef> Arbitrary for MulPair<T> {
     fn arbitrary<G: quickcheck::Gen>(g: &mut G) -> Self {
         let m1 = DOKMatrix::arbitrary(g);
         let (rows, cols) = (m1.cols, nonzero_arb(g));
-        let n = g.gen_range(0, 1.max(rows * cols / 5));
+        let n = g.gen_range(0, 1.max(rows * cols / 10));
         let entries =
             repeat_with(|| ((g.gen_range(0, rows), g.gen_range(0, cols)), nonzero_arb(g)))
                 .take(n)
