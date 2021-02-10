@@ -1,12 +1,4 @@
-let
-  sources = import ./nix/sources.nix;
-  pkgs = import sources.nixpkgs { };
-  naersk = pkgs.callPackage sources.naersk { };
-  sparseMatrix = naersk.buildPackage {
-    root = ./.;
-    doCheck = true;
-  };
+let pkgs = import <nixpkgs> { };
 in pkgs.mkShell {
-  buildInputs = [ sparseMatrix ]
-    ++ (with pkgs; [ cargo rustc rustfmt cargo-edit cargo-flamegraph ]);
+  buildInputs = with pkgs; [ cargo-edit cargo-flamegraph cargo-fuzz ];
 }

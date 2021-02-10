@@ -1,0 +1,38 @@
+
+[package]
+name = "sparse_matrix-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.3"
+
+[dependencies.sparse_matrix]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "convert"
+path = "fuzz_targets/convert.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "iter"
+path = "fuzz_targets/iter.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "test_add_1"
+path = "fuzz_targets/test_add_1.rs"
+test = false
+doc = false
