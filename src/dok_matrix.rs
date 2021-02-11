@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    iter,
-    ops::{AddAssign, Mul},
-};
+use std::{collections::BTreeMap, iter, ops::{AddAssign, Mul}};
 
 use arbitrary::Arbitrary;
 use num::{traits::NumAssignRef, Num};
@@ -16,7 +12,7 @@ pub struct DokMatrix<T> {
     cols: usize,
     entries: BTreeMap<(usize, usize), T>,
 }
-const MAX_SIZE: usize = 1 << 10;
+const MAX_SIZE: usize = 1_000;
 
 impl<T> DokMatrix<T> {
     pub fn entries(&self) -> &BTreeMap<(usize, usize), T> {
@@ -54,6 +50,7 @@ impl<T: NumAssignRef + Clone> AddAssign<&DokMatrix<T>> for DokMatrix<T> {
         for (&(i, j), t) in &rhs.entries {
             let entry = self.entries.entry((i, j)).or_insert(T::zero());
             *entry += t;
+            // TODO: check if entry == 0
         }
     }
 }
@@ -96,26 +93,30 @@ fn gen_pred<T: Arbitrary, F: Fn(&T) -> bool>(u: &mut arbitrary::Unstructured<'_>
         .unwrap()
 }
 
+fn arbitrary_matrix<T:Arbitrary+Num>(u:&mut arbitrary::Unstructured<'_>, rows: usize, cols: usize) -> arbitrary::Result<DokMatrix<T>> {
+    let mut entries = BTreeMap::new();
+    // limit density of matrices to hopefully speed up computation
+    for _ in 0..u.int_in_range(0..=rows*10)? {
+        entries.insert(
+            (
+                u.int_in_range(0..=(rows - 1))?,
+                u.int_in_range(0..=(cols - 1))?,
+            ),
+            gen_pred(u, |t: &T| !t.is_zero()),
+        );
+    }
+    Ok(DokMatrix {
+        rows,
+        cols,
+        entries,
+    })
+}
+
 impl<T: Arbitrary + Num> Arbitrary for DokMatrix<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let rows = u.int_in_range(1..=MAX_SIZE)?;
         let cols = u.int_in_range(1..=MAX_SIZE)?;
-        let mut entries = BTreeMap::new();
-        // limit density of matrices to hopefully speed up computation
-        for _ in 0..u.arbitrary_len::<T>()? {
-            entries.insert(
-                (
-                    u.int_in_range(0..=(rows - 1))?,
-                    u.int_in_range(0..=(cols - 1))?,
-                ),
-                gen_pred(u, |t: &T| !t.is_zero()),
-            );
-        }
-        Ok(DokMatrix {
-            rows,
-            cols,
-            entries,
-        })
+        arbitrary_matrix(u, rows, cols)
     }
 }
 
@@ -127,23 +128,9 @@ impl<T: Arbitrary + Num> Arbitrary for AddPair<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let m = DokMatrix::arbitrary(u)?;
         let (rows, cols) = (m.rows, m.cols);
-        let mut entries = BTreeMap::new();
-        for _ in 0..u.arbitrary_len::<T>()? {
-            entries.insert(
-                (
-                    u.int_in_range(0..=(rows - 1))?,
-                    u.int_in_range(0..=(cols - 1))?,
-                ),
-                gen_pred(u, |t: &T| !t.is_zero()),
-            );
-        }
         Ok(AddPair(
             m,
-            DokMatrix {
-                rows,
-                cols,
-                entries,
-            },
+            arbitrary_matrix(u, rows, cols)?,
         ))
     }
 }
@@ -156,23 +143,9 @@ impl<T: Arbitrary + Num> Arbitrary for MulPair<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let m = DokMatrix::arbitrary(u)?;
         let (rows, cols) = (m.cols, u.int_in_range(1..=MAX_SIZE)?);
-        let mut entries = BTreeMap::new();
-        for _ in 0..u.arbitrary_len::<T>()? {
-            entries.insert(
-                (
-                    u.int_in_range(0..=(rows - 1))?,
-                    u.int_in_range(0..=(cols - 1))?,
-                ),
-                gen_pred(u, |t: &T| !t.is_zero()),
-            );
-        }
         Ok(MulPair(
             m,
-            DokMatrix {
-                rows,
-                cols,
-                entries,
-            },
+            arbitrary_matrix(u, rows, cols)?,
         ))
     }
 }
