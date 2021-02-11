@@ -1,10 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
-use sparse_matrix::{
-    dok_matrix::{AddPair, DokMatrix},
-    CsrMatrix,
-};
+use sparse_matrix::{dok_matrix::AddPair, CsrMatrix};
 
 fuzz_target!(|p: AddPair<i32>| {
     let AddPair(mut m1, m2) = p;
@@ -12,5 +9,4 @@ fuzz_target!(|p: AddPair<i32>| {
     m3 += &CsrMatrix::from(m2.clone());
     m1 += &m2;
     assert_eq!(CsrMatrix::from(m1.clone()), m3);
-    assert_eq!(m1, DokMatrix::from(m3));
 });
