@@ -96,7 +96,7 @@ fn gen_pred<T: Arbitrary, F: Fn(&T) -> bool>(u: &mut arbitrary::Unstructured<'_>
         .unwrap()
 }
 
-impl<T: Arbitrary + Num + 'static> Arbitrary for DokMatrix<T> {
+impl<T: Arbitrary + Num> Arbitrary for DokMatrix<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let rows = u.int_in_range(1..=MAX_SIZE)?;
         let cols = u.int_in_range(1..=MAX_SIZE)?;
@@ -123,7 +123,7 @@ impl<T: Arbitrary + Num + 'static> Arbitrary for DokMatrix<T> {
 #[derive(Clone, Debug)]
 pub struct AddPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
 
-impl<T: Arbitrary + Num + 'static> Arbitrary for AddPair<T> {
+impl<T: Arbitrary + Num> Arbitrary for AddPair<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let m = DokMatrix::arbitrary(u)?;
         let (rows, cols) = (m.rows, m.cols);
@@ -152,7 +152,7 @@ impl<T: Arbitrary + Num + 'static> Arbitrary for AddPair<T> {
 #[derive(Clone, Debug)]
 pub struct MulPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
 
-impl<T: Arbitrary + Num + 'static> Arbitrary for MulPair<T> {
+impl<T: Arbitrary + Num> Arbitrary for MulPair<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let m = DokMatrix::arbitrary(u)?;
         let (rows, cols) = (m.cols, u.int_in_range(1..=MAX_SIZE)?);

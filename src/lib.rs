@@ -1,7 +1,4 @@
-#[cfg(test)]
-#[macro_use(quickcheck)]
-extern crate quickcheck_macros;
-
+use itertools::{EitherOrBoth, Itertools};
 use num::{traits::NumAssignRef, Num, Zero};
 use std::{
     borrow::Cow,
@@ -159,7 +156,7 @@ impl<T: Num + Clone> CsrMatrix<T> {
             cidx.iter().zip(vals.iter()).map(move |(&c, t)| ((r, c), t))
         })
     }
-    
+
     pub fn transpose(&self) -> CsrMatrix<T> {
         let mut new = CsrMatrix::new(self.cols, self.rows);
         let mut row_start = 0;
@@ -186,7 +183,6 @@ impl<T: Num + Clone> CsrMatrix<T> {
         new
     }
 }
-/*
 impl<T: NumAssignRef + Clone> AddAssign<&CsrMatrix<T>> for CsrMatrix<T> {
     fn add_assign(&mut self, rhs: &CsrMatrix<T>) {
         assert_eq!(
@@ -196,40 +192,65 @@ impl<T: NumAssignRef + Clone> AddAssign<&CsrMatrix<T>> for CsrMatrix<T> {
         );
 
         let (mut vals, mut cidx, mut ridx, mut start) = (vec![], vec![], BTreeMap::new(), 0);
-        // union of nonempty rows
-        let rs = self
+        // iterate keys merged in increasing order
+        for eob in self
             .ridx
-            .keys()
-            .chain(rhs.ridx.keys())
-            .copied()
-            .collect::<BTreeSet<_>>();
-        // iterate in increasing order
-        for r in rs {
-            let mut row = self
-                .get_row_entries(r)
-                .map(|(c, t)| (c, t.clone()))
-                .collect::<BTreeMap<_, _>>();
-            for (col, val) in rhs.get_row_entries(r) {
-                let entry = row.entry(col).or_insert(T::zero());
-                *entry += val;
-                if entry.is_zero() {
-                    row.remove(&col);
+            .iter()
+            .merge_join_by(rhs.ridx.iter(), |r1, r2| r1.0.cmp(r2.0))
+        {
+            match eob {
+                EitherOrBoth::Both((&r, &s1), (_, &s2)) => {
+                    // add row r of self and rhs
+                    let (mut rcidx, mut rvals): (Vec<_>, Vec<_>) = self.cidx[Range::from(s1)]
+                        .iter()
+                        .zip(&self.vals[Range::from(s1)])
+                        .merge_join_by(
+                            rhs.cidx[Range::from(s2)]
+                                .iter()
+                                .zip(&rhs.vals[Range::from(s2)]),
+                            |c1, c2| c1.0.cmp(c2.0),
+                        )
+                        .map(|eob| match eob {
+                            EitherOrBoth::Both((&c, t1), (_, t2)) => {
+                                let mut t = t1.clone();
+                                t += t2;
+                                (c, t)
+                            }
+                            EitherOrBoth::Left((&c, t)) | EitherOrBoth::Right((&c, t)) => {
+                                (c, t.clone())
+                            }
+                        })
+                        .filter(|(_, t)| !t.is_zero())
+                        .unzip();
+
+                    let len = rcidx.len();
+                    ridx.insert(r, Slice { start, len });
+                    start += len;
+                    cidx.append(&mut rcidx);
+                    vals.append(&mut rvals);
+                }
+                // all entries of row r of self are nonzero, row r of rhs is all 0
+                EitherOrBoth::Left((&r, &s)) => {
+                    cidx.extend_from_slice(&self.cidx[Range::from(s)]);
+                    vals.extend_from_slice(&self.vals[Range::from(s)]);
+                    ridx.insert(r, s);
+                    start += s.len;
+                }
+                // all entries of row r of rhs are nonzero, row r of self is all 0
+                EitherOrBoth::Right((&r, &s)) => {
+                    cidx.extend_from_slice(&rhs.cidx[Range::from(s)]);
+                    vals.extend_from_slice(&rhs.vals[Range::from(s)]);
+                    ridx.insert(r, s);
+                    start += s.len;
                 }
             }
-            let len = row.len();
-            let (mut ks, mut vs): (Vec<_>, Vec<_>) = row.into_iter().unzip();
-            cidx.append(&mut ks);
-            vals.append(&mut vs);
-            if len > 0 {
-                ridx.insert(r, Slice { start, len });
-            }
-            start += len;
         }
         self.vals = vals;
         self.cidx = cidx;
         self.ridx = ridx;
     }
 }
+/*
 
 impl<T: Num + Sum + Clone> Mul for &CsrMatrix<T> {
     type Output = CsrMatrix<T>;
