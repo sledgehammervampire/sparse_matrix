@@ -113,6 +113,8 @@ impl<T: Num> CsrMatrix<T> {
                     s.len -= 1;
                     if s.len == 0 {
                         self.ridx.remove(&i);
+                    } else {
+                        self.ridx.insert(i, s);
                     }
                     // Excluded(i) instead of i+1 for overflow
                     for (_, s) in self.ridx.range_mut((Bound::Excluded(i), Bound::Unbounded)) {
@@ -191,7 +193,7 @@ impl<T: NumAssignRef + Clone> AddAssign<&CsrMatrix<T>> for CsrMatrix<T> {
             "matrices must have identical dimensions"
         );
 
-        let (mut vals, mut cidx, mut ridx, mut start) = (vec![], vec![], BTreeMap::new(), 0);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], BTreeMap::new());
         // iterate keys merged in increasing order
         for eob in self
             .ridx
@@ -224,34 +226,51 @@ impl<T: NumAssignRef + Clone> AddAssign<&CsrMatrix<T>> for CsrMatrix<T> {
                         .unzip();
 
                     let len = rcidx.len();
-                    ridx.insert(r, Slice { start, len });
-                    start += len;
-                    cidx.append(&mut rcidx);
-                    vals.append(&mut rvals);
+                    if len > 0 {
+                        ridx.insert(
+                            r,
+                            Slice {
+                                start: cidx.len(),
+                                len,
+                            },
+                        );
+                        cidx.append(&mut rcidx);
+                        vals.append(&mut rvals);
+                    }
                 }
                 // all entries of row r of self are nonzero, row r of rhs is all 0
                 EitherOrBoth::Left((&r, &s)) => {
+                    ridx.insert(
+                        r,
+                        Slice {
+                            start: cidx.len(),
+                            len: s.len,
+                        },
+                    );
                     cidx.extend_from_slice(&self.cidx[Range::from(s)]);
                     vals.extend_from_slice(&self.vals[Range::from(s)]);
-                    ridx.insert(r, s);
-                    start += s.len;
                 }
                 // all entries of row r of rhs are nonzero, row r of self is all 0
                 EitherOrBoth::Right((&r, &s)) => {
+                    ridx.insert(
+                        r,
+                        Slice {
+                            start: cidx.len(),
+                            len: s.len,
+                        },
+                    );
                     cidx.extend_from_slice(&rhs.cidx[Range::from(s)]);
                     vals.extend_from_slice(&rhs.vals[Range::from(s)]);
-                    ridx.insert(r, s);
-                    start += s.len;
                 }
             }
         }
+
         self.vals = vals;
         self.cidx = cidx;
         self.ridx = ridx;
     }
 }
 /*
-
 impl<T: Num + Sum + Clone> Mul for &CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
