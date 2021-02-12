@@ -9,10 +9,10 @@ edition = "2018"
 [dependencies]
 num = "0.3.0"
 itertools = "0.10.0"
+proptest = "0.10.1"
 
 [dev-dependencies]
 criterion = "0.3.3"
-proptest = "0.10.1"
 
 [[bench]]
 name = "my_bench"

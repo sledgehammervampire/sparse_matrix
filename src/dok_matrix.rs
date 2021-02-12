@@ -8,6 +8,8 @@ use proptest::prelude::*;
 
 use crate::CsrMatrix;
 
+const MAX_SIZE: usize = 100;
+
 // a dumb matrix implementation to test against
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct DokMatrix<T> {
@@ -15,11 +17,11 @@ pub struct DokMatrix<T> {
     cols: usize,
     entries: BTreeMap<(usize, usize), T>,
 }
-const MAX_SIZE: usize = 100;
 
 impl<T> DokMatrix<T> {
-    pub fn entries(&self) -> &BTreeMap<(usize, usize), T> {
-        &self.entries
+    // output entries with (row, col) lexicographically ordered
+    pub fn entries(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
+        self.entries.iter().map(|(&p, t)| (p, t))
     }
 }
 
@@ -108,24 +110,24 @@ pub fn arb_matrix<T: Arbitrary>() -> impl Strategy<Value = DokMatrix<T>> {
 #[derive(Clone, Debug)]
 pub struct AddPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
 
-pub fn arb_add_pair<T: Arbitrary + Clone>() -> impl Strategy<Value = AddPair<T>> {
-    arb_matrix().prop_flat_map(|m| {
+pub fn arb_add_pair_with_rows_and_cols<T: Arbitrary + Clone>(
+    rows: usize,
+    cols: usize,
+) -> impl Strategy<Value = AddPair<T>> {
+    arb_matrix_with_rows_and_cols(rows, cols).prop_flat_map(|m| {
         arb_matrix_with_rows_and_cols(m.rows, m.cols).prop_map(move |m1| AddPair(m.clone(), m1))
     })
 }
-/*
+
+pub fn arb_add_pair<T: Arbitrary + Clone>() -> impl Strategy<Value = AddPair<T>> {
+    (1..MAX_SIZE, 1..MAX_SIZE)
+        .prop_flat_map(|(rows, cols)| arb_add_pair_with_rows_and_cols(rows, cols))
+}
+
 // pair of matrices conformable for multiplication
 #[derive(Clone, Debug)]
 pub struct MulPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
 
-impl<T: Arbitrary + Num> Arbitrary for MulPair<T> {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
-        let m = DokMatrix::arbitrary(u)?;
-        let (rows, cols) = (m.cols, u.int_in_range(1..=MAX_SIZE)?);
-        Ok(MulPair(m, arbitrary_matrix(u, rows, cols)?))
-    }
-}
-*/
 #[cfg(test)]
 mod test {
     use crate::CsrMatrix;

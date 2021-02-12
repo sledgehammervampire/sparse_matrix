@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use itertools::iproduct;
 use proptest::prelude::*;
 
@@ -25,7 +23,7 @@ proptest! {
     #[test]
     fn test_iter(m in arb_matrix::<i32>()) {
         let m1 = CsrMatrix::from(m.clone());
-        assert_eq!(&m1.iter().map(|(p, &t)| (p, t)).collect::<BTreeMap<_, _>>(), m.entries());
+        assert!(m1.iter().eq(m.entries()));
     }
 
     #[test]

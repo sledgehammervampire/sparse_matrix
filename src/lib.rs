@@ -7,7 +7,6 @@ use std::{
     ops::{AddAssign, Bound, Range},
 };
 
-#[cfg(test)]
 pub mod dok_matrix;
 #[cfg(test)]
 mod test;
