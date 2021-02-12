@@ -1,12 +1,13 @@
 use itertools::{EitherOrBoth, Itertools};
-use num::{traits::NumAssignRef, Num, Zero};
+use num::{traits::NumAssignRef, Num};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BTreeSet},
-    iter::{self, Sum},
-    ops::{AddAssign, Bound, Mul, Range},
+    collections::BTreeMap,
+    iter,
+    ops::{AddAssign, Bound, Range},
 };
 
+#[cfg(test)]
 pub mod dok_matrix;
 #[cfg(test)]
 mod test;

@@ -1,18 +1,21 @@
-use std::{collections::BTreeMap, iter, ops::{AddAssign, Mul}};
+use std::{
+    collections::BTreeMap,
+    ops::{AddAssign, Mul},
+};
 
-use arbitrary::Arbitrary;
 use num::{traits::NumAssignRef, Num};
+use proptest::prelude::*;
 
 use crate::CsrMatrix;
 
-// a dumb sparse matrix implementation to test against
+// a dumb matrix implementation to test against
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct DokMatrix<T> {
     rows: usize,
     cols: usize,
     entries: BTreeMap<(usize, usize), T>,
 }
-const MAX_SIZE: usize = 1_000;
+const MAX_SIZE: usize = 100;
 
 impl<T> DokMatrix<T> {
     pub fn entries(&self) -> &BTreeMap<(usize, usize), T> {
@@ -84,57 +87,33 @@ impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-fn gen_pred<T: Arbitrary, F: Fn(&T) -> bool>(u: &mut arbitrary::Unstructured<'_>, pred: F) -> T {
-    iter::repeat_with(|| T::arbitrary(u))
-        .find_map(|res| match res {
-            Ok(t) if pred(&t) => Some(t),
-            _ => None,
+pub fn arb_matrix_with_rows_and_cols<T: Arbitrary>(
+    rows: usize,
+    cols: usize,
+) -> impl Strategy<Value = DokMatrix<T>> {
+    proptest::collection::btree_map((0..rows, 0..cols), T::arbitrary(), 0..=(rows * cols / 10))
+        .prop_map(move |entries| DokMatrix {
+            rows,
+            cols,
+            entries,
         })
-        .unwrap()
 }
 
-fn arbitrary_matrix<T:Arbitrary+Num>(u:&mut arbitrary::Unstructured<'_>, rows: usize, cols: usize) -> arbitrary::Result<DokMatrix<T>> {
-    let mut entries = BTreeMap::new();
-    // limit density of matrices to hopefully speed up computation
-    for _ in 0..u.int_in_range(0..=rows*10)? {
-        entries.insert(
-            (
-                u.int_in_range(0..=(rows - 1))?,
-                u.int_in_range(0..=(cols - 1))?,
-            ),
-            gen_pred(u, |t: &T| !t.is_zero()),
-        );
-    }
-    Ok(DokMatrix {
-        rows,
-        cols,
-        entries,
-    })
-}
-
-impl<T: Arbitrary + Num> Arbitrary for DokMatrix<T> {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
-        let rows = u.int_in_range(1..=MAX_SIZE)?;
-        let cols = u.int_in_range(1..=MAX_SIZE)?;
-        arbitrary_matrix(u, rows, cols)
-    }
+pub fn arb_matrix<T: Arbitrary>() -> impl Strategy<Value = DokMatrix<T>> {
+    (1..MAX_SIZE, 1..MAX_SIZE)
+        .prop_flat_map(|(rows, cols)| arb_matrix_with_rows_and_cols(rows, cols))
 }
 
 // pair of matrices conformable for addition
 #[derive(Clone, Debug)]
 pub struct AddPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
 
-impl<T: Arbitrary + Num> Arbitrary for AddPair<T> {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
-        let m = DokMatrix::arbitrary(u)?;
-        let (rows, cols) = (m.rows, m.cols);
-        Ok(AddPair(
-            m,
-            arbitrary_matrix(u, rows, cols)?,
-        ))
-    }
+pub fn arb_add_pair<T: Arbitrary + Clone>() -> impl Strategy<Value = AddPair<T>> {
+    arb_matrix().prop_flat_map(|m| {
+        arb_matrix_with_rows_and_cols(m.rows, m.cols).prop_map(move |m1| AddPair(m.clone(), m1))
+    })
 }
-
+/*
 // pair of matrices conformable for multiplication
 #[derive(Clone, Debug)]
 pub struct MulPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
@@ -143,13 +122,10 @@ impl<T: Arbitrary + Num> Arbitrary for MulPair<T> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let m = DokMatrix::arbitrary(u)?;
         let (rows, cols) = (m.cols, u.int_in_range(1..=MAX_SIZE)?);
-        Ok(MulPair(
-            m,
-            arbitrary_matrix(u, rows, cols)?,
-        ))
+        Ok(MulPair(m, arbitrary_matrix(u, rows, cols)?))
     }
 }
-
+*/
 #[cfg(test)]
 mod test {
     use crate::CsrMatrix;
@@ -287,6 +263,7 @@ mod test {
             })
         )
     }
+    /*
     #[test]
     fn test_9() {
         assert_eq!(
@@ -314,6 +291,7 @@ mod test {
             }
         )
     }
+    */
     #[test]
     fn test_11() {
         assert_eq!(
