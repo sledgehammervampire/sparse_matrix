@@ -1,8 +1,9 @@
 use std::{
     collections::BTreeMap,
-    ops::{AddAssign, Mul},
+    ops::{Add, Mul},
 };
 
+use itertools::Itertools;
 use num::{traits::NumAssignRef, Num};
 use proptest::prelude::*;
 
@@ -27,11 +28,29 @@ impl<T> DokMatrix<T> {
 
 impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
     fn from(old: DokMatrix<T>) -> Self {
-        let mut new = CsrMatrix::new(old.rows, old.cols);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
         for ((i, j), t) in old.entries {
-            new.set_element((i, j), t);
+            vals.push(t);
+            cidx.push(j);
+            if let None = ridx.get(i + 1) {
+                let &k = ridx.last().unwrap();
+                for _ in ridx.len()..=i + 1 {
+                    ridx.push(k);
+                }
+            }
+            ridx[i + 1] += 1;
         }
-        new
+        let &k = ridx.last().unwrap();
+        for _ in ridx.len()..=old.rows {
+            ridx.push(k);
+        }
+        CsrMatrix {
+            rows: old.rows,
+            cols: old.cols,
+            vals,
+            cidx,
+            ridx,
+        }
     }
 }
 impl<T: Num + Clone> From<CsrMatrix<T>> for DokMatrix<T> {
@@ -44,18 +63,23 @@ impl<T: Num + Clone> From<CsrMatrix<T>> for DokMatrix<T> {
     }
 }
 
-impl<T: NumAssignRef + Clone> AddAssign<&DokMatrix<T>> for DokMatrix<T> {
-    fn add_assign(&mut self, rhs: &DokMatrix<T>) {
-        assert_eq!(
-            (self.rows, self.cols),
-            (rhs.rows, rhs.cols),
-            "matrices must have identical dimensions"
-        );
+impl<T: Num> Add for DokMatrix<T> {
+    type Output = DokMatrix<T>;
 
-        for (&(i, j), t) in &rhs.entries {
-            let entry = self.entries.entry((i, j)).or_insert(T::zero());
-            *entry += t;
-            // TODO: check if entry == 0
+    fn add(self, rhs: Self) -> Self::Output {
+        DokMatrix {
+            rows: self.rows,
+            cols: self.cols,
+            entries: self
+                .entries
+                .into_iter()
+                .merge_join_by(rhs.entries, |e1, e2| e1.0.cmp(&e2.0))
+                .map(|eob| match eob {
+                    itertools::EitherOrBoth::Both((p, t1), (_, t2)) => (p, t1 + t2),
+                    itertools::EitherOrBoth::Left((p, t))
+                    | itertools::EitherOrBoth::Right((p, t)) => (p, t),
+                })
+                .collect(),
         }
     }
 }
@@ -89,7 +113,7 @@ impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-pub fn arb_matrix_with_rows_and_cols<T: Arbitrary>(
+pub fn arb_matrix_fixed_size<T: Arbitrary>(
     rows: usize,
     cols: usize,
 ) -> impl Strategy<Value = DokMatrix<T>> {
@@ -102,31 +126,44 @@ pub fn arb_matrix_with_rows_and_cols<T: Arbitrary>(
 }
 
 pub fn arb_matrix<T: Arbitrary>() -> impl Strategy<Value = DokMatrix<T>> {
-    (1..MAX_SIZE, 1..MAX_SIZE)
-        .prop_flat_map(|(rows, cols)| arb_matrix_with_rows_and_cols(rows, cols))
+    (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| arb_matrix_fixed_size(rows, cols))
 }
 
 // pair of matrices conformable for addition
 #[derive(Clone, Debug)]
 pub struct AddPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
 
-pub fn arb_add_pair_with_rows_and_cols<T: Arbitrary + Clone>(
+pub fn arb_add_pair_fixed_size<T: Arbitrary + Clone>(
     rows: usize,
     cols: usize,
 ) -> impl Strategy<Value = AddPair<T>> {
-    arb_matrix_with_rows_and_cols(rows, cols).prop_flat_map(|m| {
-        arb_matrix_with_rows_and_cols(m.rows, m.cols).prop_map(move |m1| AddPair(m.clone(), m1))
+    arb_matrix_fixed_size(rows, cols).prop_flat_map(|m| {
+        arb_matrix_fixed_size(m.rows, m.cols).prop_map(move |m1| AddPair(m.clone(), m1))
     })
 }
 
 pub fn arb_add_pair<T: Arbitrary + Clone>() -> impl Strategy<Value = AddPair<T>> {
-    (1..MAX_SIZE, 1..MAX_SIZE)
-        .prop_flat_map(|(rows, cols)| arb_add_pair_with_rows_and_cols(rows, cols))
+    (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| arb_add_pair_fixed_size(rows, cols))
 }
 
 // pair of matrices conformable for multiplication
 #[derive(Clone, Debug)]
 pub struct MulPair<T>(pub DokMatrix<T>, pub DokMatrix<T>);
+
+pub fn arb_mul_pair_fixed_size<T: Arbitrary + Clone>(
+    l: usize,
+    n: usize,
+    p: usize,
+) -> impl Strategy<Value = MulPair<T>> {
+    arb_matrix_fixed_size(l, n).prop_flat_map(move |m| {
+        arb_matrix_fixed_size(n, p).prop_map(move |m1| MulPair(m.clone(), m1))
+    })
+}
+
+pub fn arb_mul_pair<T: Arbitrary + Clone>() -> impl Strategy<Value = MulPair<T>> {
+    (1..MAX_SIZE, 1..MAX_SIZE, 1..MAX_SIZE)
+        .prop_flat_map(|(l, n, p)| arb_mul_pair_fixed_size(l, n, p))
+}
 
 #[cfg(test)]
 mod test {
@@ -162,12 +199,7 @@ mod test {
     #[test]
     fn test_3() {
         assert_eq!(
-            {
-                let mut m1 = CsrMatrix::identity(3);
-                let m2 = CsrMatrix::identity(3);
-                m1 += &m2;
-                m1
-            },
+            CsrMatrix::identity(3) + CsrMatrix::identity(3),
             CsrMatrix::from(DokMatrix {
                 rows: 3,
                 cols: 3,
@@ -265,7 +297,6 @@ mod test {
             })
         )
     }
-    /*
     #[test]
     fn test_9() {
         assert_eq!(
@@ -293,7 +324,6 @@ mod test {
             }
         )
     }
-    */
     #[test]
     fn test_11() {
         assert_eq!(

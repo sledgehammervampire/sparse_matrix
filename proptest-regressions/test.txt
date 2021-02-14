@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 926922c99dbfbfa614a76f4580ffe8f4c243875a16eaeab5604537b330f7cd0f # shrinks to m = DokMatrix { rows: 2, cols: 5, entries: {(0, 0): 1} }
+cc 963349c87e564dcd0b3f011940dfde773761b9020a90022eee3a55f420ff2f7d # shrinks to m = DokMatrix { rows: 1, cols: 10, entries: {(0, 0): 0} }
+cc 75b4b2d02592d1122bdb677437f60b7e7a0dfdf5df0e242da9481c24be45e17b # shrinks to m = DokMatrix { rows: 1, cols: 1, entries: {} }
+cc 88252637089903704befa613789c363750776c590d43628ae0694ebe2ecbece5 # shrinks to m = DokMatrix { rows: 1, cols: 1, entries: {} }
+cc 3a2f116ba61a6cc83e9324ed8d89c27a0cdb20d9795143e1becd9b8f25fd3abf # shrinks to m = DokMatrix { rows: 1, cols: 1, entries: {} }
