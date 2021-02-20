@@ -1,11 +1,9 @@
 use itertools::{iproduct, Itertools};
 use num::Num;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{
     borrow::Cow,
     iter, mem,
     ops::{Add, Mul},
-    sync::Mutex,
     vec,
 };
 
@@ -194,22 +192,17 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
 
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
         for (i, (a, b)) in self.ridx.iter().copied().tuple_windows().enumerate() {
-            let row = iter::repeat_with(|| Mutex::new(T::zero()))
+            let mut row = iter::repeat_with(|| T::zero())
                 .take(rhs.cols)
                 .collect::<Vec<_>>();
-            self.cidx[a..b]
-                .par_iter()
-                .zip(&self.vals[a..b])
-                .for_each(|(&k, t)| {
-                    let (rcidx, rvals) = rhs.get_row_entries(k);
-                    for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
-                        let mut entry = row[j].lock().unwrap();
-                        *entry = mem::replace(&mut *entry, T::zero()) + t.clone() * t1.clone();
-                    }
-                });
+            for (&k, t) in self.cidx[a..b].iter().zip(&self.vals[a..b]) {
+                let (rcidx, rvals) = rhs.get_row_entries(k);
+                for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
+                    row[j] = mem::replace(&mut row[j], T::zero()) + t.clone() * t1.clone();
+                }
+            }
             let (mut rcidx, mut rvals): (Vec<_>, Vec<_>) = row
                 .into_iter()
-                .map(|t| t.into_inner().unwrap())
                 .enumerate()
                 .filter(|(_, t)| !t.is_zero())
                 .unzip();
