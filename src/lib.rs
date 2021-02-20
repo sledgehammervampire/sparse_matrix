@@ -1,5 +1,6 @@
 use itertools::{iproduct, Itertools};
 use num::Num;
+use rayon::prelude::*;
 use std::{
     borrow::Cow,
     iter, mem,
@@ -190,25 +191,31 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     fn mul(self, rhs: Self) -> Self::Output {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
-        for (i, (a, b)) in self.ridx.iter().copied().tuple_windows().enumerate() {
-            let mut row = iter::repeat_with(|| T::zero())
-                .take(rhs.cols)
-                .collect::<Vec<_>>();
-            for (&k, t) in self.cidx[a..b].iter().zip(&self.vals[a..b]) {
-                let (rcidx, rvals) = rhs.get_row_entries(k);
-                for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
-                    row[j] = mem::replace(&mut row[j], T::zero()) + t.clone() * t1.clone();
+        let mut rows: Vec<(Vec<usize>, Vec<T>)> = vec![];
+        self.ridx
+            .par_iter()
+            .zip(self.ridx.par_iter().skip(1))
+            .map(|(&a, &b)| {
+                let mut row = iter::repeat_with(|| T::zero())
+                    .take(rhs.cols)
+                    .collect::<Vec<_>>();
+                for (&k, t) in self.cidx[a..b].iter().zip(&self.vals[a..b]) {
+                    let (rcidx, rvals) = rhs.get_row_entries(k);
+                    for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
+                        row[j] = mem::replace(&mut row[j], T::zero()) + t.clone() * t1.clone();
+                    }
                 }
-            }
-            let (mut rcidx, mut rvals): (Vec<_>, Vec<_>) = row
-                .into_iter()
-                .enumerate()
-                .filter(|(_, t)| !t.is_zero())
-                .unzip();
-            ridx.push(ridx[i] + rcidx.len());
-            vals.append(&mut rvals);
-            cidx.append(&mut rcidx);
+                row.into_iter()
+                    .enumerate()
+                    .filter(|(_, t)| !t.is_zero())
+                    .unzip()
+            })
+            .collect_into_vec(&mut rows);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+        for (rcidx, rvals) in rows {
+            ridx.push(ridx.last().unwrap() + rcidx.len());
+            vals.extend(rvals);
+            cidx.extend(rcidx);
         }
         CsrMatrix {
             rows: self.rows,
