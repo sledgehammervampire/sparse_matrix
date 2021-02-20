@@ -1,10 +1,11 @@
 use itertools::{iproduct, Itertools};
 use num::Num;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
     iter, mem,
     ops::{Add, Mul},
+    sync::Mutex,
     vec,
 };
 
@@ -185,7 +186,7 @@ impl<T: Num> Add for CsrMatrix<T> {
     }
 }
 
-impl<T: Num + Clone> Mul for &CsrMatrix<T> {
+impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -193,16 +194,25 @@ impl<T: Num + Clone> Mul for &CsrMatrix<T> {
 
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
         for (i, (a, b)) in self.ridx.iter().copied().tuple_windows().enumerate() {
-            let mut row = BTreeMap::new();
-            for (&k, t) in self.cidx[a..b].iter().zip(self.vals[a..b].iter()) {
-                let (rcidx, rvals) = rhs.get_row_entries(k);
-                for (j, t1) in rcidx.iter().zip(rvals.iter()) {
-                    let s = row.remove(j).unwrap_or(T::zero()) + t.clone() * t1.clone();
-                    row.insert(*j, s);
-                }
-            }
-            let (mut rcidx, mut rvals): (Vec<_>, Vec<_>) =
-                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip();
+            let row = iter::repeat_with(|| Mutex::new(T::zero()))
+                .take(rhs.cols)
+                .collect::<Vec<_>>();
+            self.cidx[a..b]
+                .par_iter()
+                .zip(&self.vals[a..b])
+                .for_each(|(&k, t)| {
+                    let (rcidx, rvals) = rhs.get_row_entries(k);
+                    for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
+                        let mut entry = row[j].lock().unwrap();
+                        *entry = mem::replace(&mut *entry, T::zero()) + t.clone() * t1.clone();
+                    }
+                });
+            let (mut rcidx, mut rvals): (Vec<_>, Vec<_>) = row
+                .into_iter()
+                .map(|t| t.into_inner().unwrap())
+                .enumerate()
+                .filter(|(_, t)| !t.is_zero())
+                .unzip();
             ridx.push(ridx[i] + rcidx.len());
             vals.append(&mut rvals);
             cidx.append(&mut rcidx);
