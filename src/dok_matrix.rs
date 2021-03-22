@@ -6,7 +6,7 @@ use nom::{
     character::complete::{digit1, line_ending, not_line_ending},
     combinator::{map, map_res, opt, recognize},
     multi::{fold_many0, many0},
-    sequence::{delimited, pair, tuple},
+    sequence::{delimited, pair, preceded, tuple},
     IResult,
 };
 use num::{traits::NumAssignRef, Num};
@@ -299,10 +299,22 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
     use nom::character::complete::char;
 
     // parse header
-    let (input, _) = tag("%%MatrixMarket matrix coordinate integer")(input)?;
+    let (input, _) = tag("%%MatrixMarket matrix coordinate")(input)?;
+    let (input, entry_type) = preceded(
+        char(' '),
+        alt((tag("integer"), tag("real"), tag("complex"), tag("pattern"))),
+    )(input)?;
+    if entry_type != "integer" {
+        unimplemented!("matrix entry type {} unsupported", entry_type);
+    }
     let (input, shape) = delimited(
         char(' '),
-        alt((tag("general"), tag("symmetric"))),
+        alt((
+            tag("general"),
+            tag("symmetric"),
+            tag("skew-symmetric"),
+            tag("hermitian"),
+        )),
         line_ending,
     )(input)?;
     // parse comments
@@ -315,8 +327,8 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
                 BTreeMap::new(),
                 |mut entries, (r, c, t)| {
                     // matrix market format is 1-indexed, but our matrix is 0-indexed
-                    entries.insert((r-1, c-1), t.clone());
-                    entries.insert((c-1, r-1), t);
+                    entries.insert((r - 1, c - 1), t.clone());
+                    entries.insert((c - 1, r - 1), t);
                     entries
                 },
             )(input)?;
@@ -335,7 +347,7 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
                 BTreeMap::new(),
                 |mut entries, (r, c, t)| {
                     // matrix market format is 1-indexed, but our matrix is 0-indexed
-                    entries.insert((r-1, c-1), t.clone());
+                    entries.insert((r - 1, c - 1), t.clone());
                     entries
                 },
             )(input)?;
@@ -349,7 +361,7 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
             ))
         }
         _ => {
-            todo!()
+            unimplemented!("matrix shape {} unsupported", shape);
         }
     }
 }
