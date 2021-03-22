@@ -1,5 +1,6 @@
 use itertools::{iproduct, Itertools};
 use num::Num;
+use proptest::num::usize;
 use rayon::prelude::*;
 use std::{
     borrow::Cow,
@@ -10,7 +11,13 @@ use std::{
 
 pub mod dok_matrix;
 #[cfg(test)]
-mod test;
+mod tests;
+
+pub trait Matrix<T: Num + Clone> {
+    fn rows(&self) -> usize;
+    fn cols(&self) -> usize;
+    fn get_element(&self, pos: (usize, usize)) -> Cow<T>;
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T> {
@@ -45,14 +52,6 @@ impl<T> CsrMatrix<T> {
             cidx: Vec::with_capacity(capacity),
             ridx: vec![0; rows + 1],
         }
-    }
-
-    pub fn rows(&self) -> usize {
-        self.rows
-    }
-
-    pub fn cols(&self) -> usize {
-        self.cols
     }
 
     fn get_row_entries(&self, i: usize) -> (&[usize], &[T]) {
@@ -114,17 +113,6 @@ impl<T: Num> CsrMatrix<T> {
 }
 
 impl<T: Num + Clone> CsrMatrix<T> {
-    pub fn get_element(&self, (i, j): (usize, usize)) -> Cow<T> {
-        assert!(
-            (..self.rows).contains(&i) && (..self.cols).contains(&j),
-            "values are not in bounds"
-        );
-
-        let (cidx, vals) = self.get_row_entries(i);
-        cidx.binary_search(&j)
-            .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
-    }
-
     pub fn transpose(&self) -> CsrMatrix<T> {
         let mut new = CsrMatrix::new(self.cols, self.rows);
         for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
@@ -133,6 +121,27 @@ impl<T: Num + Clone> CsrMatrix<T> {
             }
         }
         new
+    }
+}
+
+impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
+    fn rows(&self) -> usize {
+        self.rows
+    }
+
+    fn cols(&self) -> usize {
+        self.cols
+    }
+
+    fn get_element(&self, (i, j): (usize, usize)) -> Cow<T> {
+        assert!(
+            (..self.rows).contains(&i) && (..self.cols).contains(&j),
+            "values are not in bounds"
+        );
+
+        let (cidx, vals) = self.get_row_entries(i);
+        cidx.binary_search(&j)
+            .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
     }
 }
 
