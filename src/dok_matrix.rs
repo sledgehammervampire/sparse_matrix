@@ -1,4 +1,4 @@
-use crate::{CsrMatrix, Matrix};
+use crate::{arbitrary::arb_matrix, CsrMatrix, Matrix, Slice};
 use itertools::Itertools;
 use nom::{
     branch::alt,
@@ -10,11 +10,10 @@ use nom::{
     IResult,
 };
 use num::{traits::NumAssignRef, Num};
-use proptest::{arbitrary::Arbitrary, prelude::*, sample::subsequence, strategy::Strategy};
+use proptest::{arbitrary::Arbitrary, prelude::*, strategy::Strategy};
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    iter::repeat_with,
     ops::{Add, Mul},
     str::FromStr,
 };
@@ -50,21 +49,19 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
 
 impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
     fn from(old: DokMatrix<T>) -> Self {
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], BTreeMap::new());
+        // note that (i, j) is iterated in lexicographic order
         for ((i, j), t) in old.entries {
-            vals.push(t);
-            cidx.push(j);
-            if let None = ridx.get(i + 1) {
-                let &k = ridx.last().unwrap();
-                for _ in ridx.len()..=i + 1 {
-                    ridx.push(k);
-                }
+            if !t.is_zero() {
+                ridx.entry(i)
+                    .or_insert(Slice {
+                        start: vals.len(),
+                        len: 0,
+                    })
+                    .len += 1;
+                vals.push(t);
+                cidx.push(j);
             }
-            ridx[i + 1] += 1;
-        }
-        let &k = ridx.last().unwrap();
-        for _ in ridx.len()..=old.rows {
-            ridx.push(k);
         }
         CsrMatrix {
             rows: old.rows,
@@ -143,8 +140,6 @@ impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-const MAX_SIZE: usize = 100;
-
 pub fn arb_dok_matrix_fixed_size<T: Arbitrary + Num>(
     rows: usize,
     cols: usize,
@@ -161,100 +156,8 @@ pub fn arb_dok_matrix_fixed_size<T: Arbitrary + Num>(
     })
 }
 
-pub fn arb_csr_matrix_fixed_size<T: Arbitrary + Num>(
-    rows: usize,
-    cols: usize,
-) -> impl Strategy<Value = CsrMatrix<T>> {
-    repeat_with(|| subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
-        .take(rows)
-        .collect::<Vec<_>>()
-        .prop_flat_map(move |cidx| {
-            let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
-            for mut rcidx in cidx {
-                ridx.push(ridx.last().unwrap() + rcidx.len());
-                cidx_flattened.append(&mut rcidx);
-            }
-            repeat_with(|| T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()))
-                .take(cidx_flattened.len())
-                .collect::<Vec<_>>()
-                .prop_map(move |vals| CsrMatrix {
-                    rows,
-                    cols,
-                    vals,
-                    cidx: cidx_flattened.clone(),
-                    ridx: ridx.clone(),
-                })
-        })
-}
-
-fn arb_matrix<T: Arbitrary, F: Fn(usize, usize) -> S, S: Strategy>(
-    arb_matrix_fixed_size: F,
-) -> impl Strategy<Value = S::Value> {
-    (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(move |(rows, cols)| arb_matrix_fixed_size(rows, cols))
-}
-
 pub fn arb_dok_matrix<T: Arbitrary + Num>() -> impl Strategy<Value = DokMatrix<T>> {
     arb_matrix::<T, _, _>(arb_dok_matrix_fixed_size)
-}
-
-pub fn arb_csr_matrix<T: Arbitrary + Num>() -> impl Strategy<Value = CsrMatrix<T>> {
-    arb_matrix::<T, _, _>(arb_csr_matrix_fixed_size)
-}
-
-// pair of matrices conformable for addition
-#[derive(Clone, Debug)]
-pub struct AddPair<M>(pub M, pub M);
-
-pub fn arb_add_pair_fixed_size<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S, S: Strategy>(
-    rows: usize,
-    cols: usize,
-    arb_matrix_fixed_size: F,
-) -> impl Strategy<Value = AddPair<S::Value>>
-where
-    S::Value: Matrix<T> + Clone,
-{
-    arb_matrix_fixed_size(rows, cols).prop_flat_map(move |m| {
-        arb_matrix_fixed_size(m.rows(), m.cols()).prop_map(move |m1| AddPair(m.clone(), m1))
-    })
-}
-
-pub fn arb_add_pair<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S + Copy, S: Strategy>(
-    arb_matrix_fixed_size: F,
-) -> impl Strategy<Value = AddPair<S::Value>>
-where
-    S::Value: Matrix<T> + Clone,
-{
-    (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(move |(rows, cols)| {
-        arb_add_pair_fixed_size(rows, cols, arb_matrix_fixed_size)
-    })
-}
-
-// pair of matrices conformable for multiplication
-#[derive(Clone, Debug)]
-pub struct MulPair<M>(pub M, pub M);
-
-pub fn arb_mul_pair_fixed_size<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S, S: Strategy>(
-    l: usize,
-    n: usize,
-    p: usize,
-    arb_matrix_fixed_size: F,
-) -> impl Strategy<Value = MulPair<S::Value>>
-where
-    S::Value: Matrix<T> + Clone,
-{
-    arb_matrix_fixed_size(l, n).prop_flat_map(move |m| {
-        arb_matrix_fixed_size(n, p).prop_map(move |m1| MulPair(m.clone(), m1))
-    })
-}
-
-pub fn arb_mul_pair<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S + Copy, S: Strategy>(
-    arb_matrix_fixed_size: F,
-) -> impl Strategy<Value = MulPair<S::Value>>
-where
-    S::Value: Matrix<T> + Clone,
-{
-    (1..MAX_SIZE, 1..MAX_SIZE, 1..MAX_SIZE)
-        .prop_flat_map(move |(l, n, p)| arb_mul_pair_fixed_size(l, n, p, arb_matrix_fixed_size))
 }
 
 fn parse_num<T: FromStr>(input: &str) -> IResult<&str, T> {
