@@ -1,14 +1,6 @@
-use crate::{arbitrary::arb_matrix, CsrMatrix, Matrix, Slice};
+use crate::{arbitrary::arb_matrix, csr_matrix::CsrMatrix, Matrix};
 use itertools::Itertools;
-use nom::{
-    branch::alt,
-    bytes::complete::tag,
-    character::complete::{digit1, line_ending, not_line_ending},
-    combinator::{map, map_res, opt, recognize},
-    multi::{fold_many0, many0},
-    sequence::{delimited, pair, preceded, tuple},
-    IResult,
-};
+use nom::IResult;
 use num::{traits::NumAssignRef, Num};
 use proptest::{arbitrary::Arbitrary, prelude::*, strategy::Strategy};
 use std::{
@@ -33,6 +25,25 @@ impl<T: Num + Clone> DokMatrix<T> {
     }
 }
 
+impl<T: Arbitrary + Num> DokMatrix<T> {
+    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl Strategy<Value = Self> {
+        prop::collection::btree_map(
+            (0..rows, 0..cols),
+            T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()),
+            0..=(rows * cols),
+        )
+        .prop_map(move |entries| DokMatrix {
+            rows,
+            cols,
+            entries,
+        })
+    }
+
+    pub fn arb_matrix() -> impl Strategy<Value = Self> {
+        arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
+    }
+}
+
 impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
     fn rows(&self) -> usize {
         self.rows
@@ -45,41 +56,39 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
             .get(&pos)
             .map_or(Cow::Owned(T::zero()), Cow::Borrowed)
     }
-}
 
-impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
-    fn from(old: DokMatrix<T>) -> Self {
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], BTreeMap::new());
-        // note that (i, j) is iterated in lexicographic order
-        for ((i, j), t) in old.entries {
-            if !t.is_zero() {
-                ridx.entry(i)
-                    .or_insert(Slice {
-                        start: vals.len(),
-                        len: 0,
-                    })
-                    .len += 1;
-                vals.push(t);
-                cidx.push(j);
-            }
+    fn set_element(&mut self, pos: (usize, usize), t: T) {
+        self.entries.insert(pos, t);
+    }
+
+    fn identity(n: usize) -> Self {
+        DokMatrix {
+            rows: n,
+            cols: n,
+            entries: (0..n).map(|i| ((i, i), T::one())).collect(),
         }
-        CsrMatrix {
-            rows: old.rows,
-            cols: old.cols,
-            vals,
-            cidx,
-            ridx,
+    }
+
+    fn transpose(self) -> Self {
+        DokMatrix {
+            rows: self.cols,
+            cols: self.rows,
+            entries: self
+                .entries
+                .into_iter()
+                .map(|((i, j), t)| ((j, i), t))
+                .collect(),
         }
     }
 }
 
-impl<T: Num + Clone> From<CsrMatrix<T>> for DokMatrix<T> {
-    fn from(old: CsrMatrix<T>) -> Self {
-        DokMatrix {
-            rows: old.rows,
-            cols: old.cols,
-            entries: old.iter().map(|(i, t)| (i, t.clone())).collect(),
-        }
+impl<T> IntoIterator for DokMatrix<T> {
+    type Item = ((usize, usize), T);
+
+    type IntoIter = std::collections::btree_map::IntoIter<(usize, usize), T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
     }
 }
 
@@ -140,66 +149,57 @@ impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-pub fn arb_dok_matrix_fixed_size<T: Arbitrary + Num>(
-    rows: usize,
-    cols: usize,
-) -> impl Strategy<Value = DokMatrix<T>> {
-    prop::collection::btree_map(
-        (0..rows, 0..cols),
-        T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()),
-        0..=(rows * cols),
-    )
-    .prop_map(move |entries| DokMatrix {
-        rows,
-        cols,
-        entries,
-    })
-}
-
-pub fn arb_dok_matrix<T: Arbitrary + Num>() -> impl Strategy<Value = DokMatrix<T>> {
-    arb_matrix::<T, _, _>(arb_dok_matrix_fixed_size)
-}
-
-fn parse_num<T: FromStr>(input: &str) -> IResult<&str, T> {
-    use nom::character::complete::char;
-
-    map_res(recognize(pair(opt(char('-')), digit1)), str::parse)(input)
-}
-
-fn matrix_size(input: &str) -> IResult<&str, (usize, usize)> {
-    use nom::character::complete::char;
-
-    map(
-        tuple((
-            parse_num::<usize>,
-            char(' '),
-            parse_num::<usize>,
-            char(' '),
-            parse_num::<usize>,
-            line_ending,
-        )),
-        |(r, _, c, _, _, _)| (r, c),
-    )(input)
-}
-
-fn matrix_entry<T: FromStr>(input: &str) -> IResult<&str, (usize, usize, T)> {
-    use nom::character::complete::char;
-
-    map(
-        tuple((
-            parse_num::<usize>,
-            char(' '),
-            parse_num::<usize>,
-            char(' '),
-            parse_num::<T>,
-            line_ending,
-        )),
-        |(r, _, c, _, e, _)| (r, c, e),
-    )(input)
+impl<T: Num + Clone> From<CsrMatrix<T>> for DokMatrix<T> {
+    fn from(old: CsrMatrix<T>) -> Self {
+        DokMatrix {
+            rows: old.rows(),
+            cols: old.cols(),
+            entries: old.iter().map(|(i, t)| (i, t.clone())).collect(),
+        }
+    }
 }
 
 pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, DokMatrix<T>> {
-    use nom::character::complete::char;
+    use nom::{
+        branch::alt,
+        bytes::complete::tag,
+        character::complete::{char, digit1, line_ending, not_line_ending},
+        combinator::{map, map_res, opt, recognize},
+        multi::{fold_many0, many0},
+        sequence::{delimited, pair, preceded, tuple},
+    };
+
+    fn parse_num<T: FromStr>(input: &str) -> IResult<&str, T> {
+        map_res(recognize(pair(opt(char('-')), digit1)), str::parse)(input)
+    }
+
+    fn matrix_size(input: &str) -> IResult<&str, (usize, usize)> {
+        map(
+            tuple((
+                parse_num::<usize>,
+                char(' '),
+                parse_num::<usize>,
+                char(' '),
+                parse_num::<usize>,
+                line_ending,
+            )),
+            |(r, _, c, _, _, _)| (r, c),
+        )(input)
+    }
+
+    fn matrix_entry<T: FromStr>(input: &str) -> IResult<&str, (usize, usize, T)> {
+        map(
+            tuple((
+                parse_num::<usize>,
+                char(' '),
+                parse_num::<usize>,
+                char(' '),
+                parse_num::<T>,
+                line_ending,
+            )),
+            |(r, _, c, _, e, _)| (r, c, e),
+        )(input)
+    }
 
     // parse header
     let (input, _) = tag("%%MatrixMarket matrix coordinate")(input)?;
@@ -272,7 +272,7 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
 #[cfg(test)]
 mod tests {
     use super::DokMatrix;
-    use crate::CsrMatrix;
+    use crate::{csr_matrix::CsrMatrix, Matrix};
 
     #[test]
     fn test_1() {

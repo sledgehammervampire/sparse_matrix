@@ -1,37 +1,29 @@
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use sparse_matrix::{
-    dok_matrix::{arb_add_pair_fixed_size, arb_mul_pair_fixed_size, AddPair, MulPair},
-    CsrMatrix,
-};
+use std::fs::read_to_string;
 
-pub fn bench_add(c: &mut Criterion) {
-    c.bench_function("bench add", |b| {
-        let mut runner = TestRunner::default();
-        let AddPair(m1, m2) = arb_add_pair_fixed_size::<i32>(1000, 1000)
-            .new_tree(&mut runner)
-            .unwrap()
-            .current();
-        let (m1, m2) = (CsrMatrix::from(m1), CsrMatrix::from(m2));
-        b.iter_batched(
-            || (m1.clone(), m2.clone()),
-            |(m1, m2)| m1 + m2,
-            BatchSize::SmallInput,
-        )
-    });
-}
+use criterion::{criterion_group, criterion_main, Criterion};
+use spam::{csr_matrix::CsrMatrix, dok_matrix::parse_matrix_market, Matrix};
 
 pub fn bench_mul(c: &mut Criterion) {
-    c.bench_function("bench mul", |b| {
-        let mut runner = TestRunner::default();
-        let MulPair(m1, m2) = arb_mul_pair_fixed_size::<i32>(1000, 1000, 1000)
-            .new_tree(&mut runner)
-            .unwrap()
-            .current();
-        let (m1, m2) = (CsrMatrix::from(m1), CsrMatrix::from(m2));
-        b.iter_batched(|| (&m1, &m2), |(m1, m2)| m1 * m2, BatchSize::SmallInput)
-    });
+    const FILES: &[&str] = &["big", "gr_30_30", "bcsstm01"];
+    for f in FILES {
+        let m1 = CsrMatrix::from(
+            parse_matrix_market::<i32>(&read_to_string(format!("matrices/{}.mtx", f)).unwrap())
+                .unwrap()
+                .1,
+        );
+        let m2 = m1.clone();
+        c.bench_function(
+            &format!(
+                "bench mul {} ({}x{}, {} entries)",
+                f,
+                m1.rows(),
+                m1.cols(),
+                m1.iter().count()
+            ),
+            |b| b.iter(|| &m1 * &m2),
+        );
+    }
 }
 
-criterion_group!(benches, bench_add, bench_mul);
+criterion_group!(benches, bench_mul);
 criterion_main!(benches);
