@@ -12,7 +12,7 @@ use std::{
     vec,
 };
 
-use crate::{dok_matrix::DokMatrix, Matrix};
+use crate::{Matrix, dok_matrix::DokMatrix, is_increasing};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T> {
@@ -106,18 +106,6 @@ impl<T: Arbitrary + Num> CsrMatrix<T> {
     pub fn arb_matrix() -> impl Strategy<Value = Self> {
         crate::arbitrary::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
     }
-}
-
-fn is_increasing(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) > max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
 }
 
 impl<T: Num> CsrMatrix<T> {

@@ -18,3 +18,27 @@ pub trait Matrix<T: ToOwned> {
     fn identity(n: usize) -> Self;
     fn transpose(self) -> Self;
 }
+
+fn is_sorted(s: &[usize]) -> bool {
+    let mut max = None;
+    for i in s {
+        if Some(i) >= max {
+            max = Some(i);
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_increasing(s: &[usize]) -> bool {
+    let mut max = None;
+    for i in s {
+        if Some(i) > max {
+            max = Some(i);
+        } else {
+            return false;
+        }
+    }
+    true
+}

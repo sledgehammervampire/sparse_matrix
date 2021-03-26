@@ -64,7 +64,11 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
     }
 
     fn set_element(&mut self, pos: (usize, usize), t: T) {
-        self.entries.insert(pos, t);
+        if t.is_zero() {
+            self.entries.remove(&pos);
+        } else {
+            self.entries.insert(pos, t);
+        }
     }
 
     fn identity(n: usize) -> Self {

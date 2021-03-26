@@ -12,7 +12,19 @@ use std::{
     vec,
 };
 
-use crate::{dok_matrix::DokMatrix, Matrix};
+use crate::{dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Slice {
+    pub start: usize,
+    pub len: usize,
+}
+
+impl From<Slice> for Range<usize> {
+    fn from(s: Slice) -> Self {
+        s.start..s.start + s.len
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T> {
@@ -26,30 +38,6 @@ pub struct CsrMatrix<T> {
     // containing nonzero entries on row i, and vals[ridx[i]..ridx[i+1]] are
     // the respective entries
     ridx: Vec<usize>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Slice {
-    pub start: usize,
-    pub len: usize,
-}
-
-impl From<Slice> for Range<usize> {
-    fn from(s: Slice) -> Self {
-        s.start..s.start + s.len
-    }
-}
-
-fn is_sorted(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) >= max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
 }
 
 impl<T> CsrMatrix<T> {
@@ -86,6 +74,18 @@ impl<T> CsrMatrix<T> {
                 .zip(vals.iter())
                 .map(move |(c, t)| ((r, c), t))
         })
+    }
+
+    fn rows(&self) -> usize {
+        self.rows
+    }
+
+    fn cols(&self) -> usize {
+        self.cols
+    }
+
+    fn len(&self) -> usize {
+        self.cidx.len()
     }
 }
 
@@ -124,7 +124,46 @@ impl<T: Num> CsrMatrix<T> {
             .iter()
             .copied()
             .zip(self.ridx.iter().skip(1).copied())
-            .all(|(a, b)| is_sorted(&self.cidx[a..b]))
+            .all(|(a, b)| is_increasing(&self.cidx[a..b]))
+    }
+
+    fn identity(n: usize) -> CsrMatrix<T> {
+        CsrMatrix {
+            rows: n,
+            cols: n,
+            vals: repeat_with(|| T::one()).take(n).collect(),
+            cidx: (0..n).map(|i| i).collect(),
+            ridx: (0..=n).map(|i| i).collect(),
+        }
+    }
+
+    fn set_element(&mut self, (i, j): (usize, usize), t: T) {
+        assert!(i < self.rows && j < self.cols, "position not in bounds");
+
+        match self.get_row_entries(i).0.binary_search(&j) {
+            Ok(k) => {
+                let l = self.ridx[i] + k;
+                if t.is_zero() {
+                    self.vals.remove(l);
+                    self.cidx.remove(l);
+                    for m in i + 1..=self.rows {
+                        self.ridx[m] -= 1;
+                    }
+                } else {
+                    self.vals[l] = t;
+                }
+            }
+            Err(k) => {
+                if !t.is_zero() {
+                    let l = self.ridx[i] + k;
+                    self.vals.insert(l, t);
+                    self.cidx.insert(l, j);
+                    for m in i + 1..=self.rows {
+                        self.ridx[m] += 1;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -158,18 +197,6 @@ impl<T: Arbitrary + Num> CsrMatrix<T> {
 }
 
 impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
-    fn rows(&self) -> usize {
-        self.rows
-    }
-
-    fn cols(&self) -> usize {
-        self.cols
-    }
-
-    fn len(&self) -> usize {
-        self.cidx.len()
-    }
-
     fn get_element(&self, (i, j): (usize, usize)) -> Cow<T> {
         assert!(
             (..self.rows).contains(&i) && (..self.cols).contains(&j),
@@ -181,48 +208,6 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
             .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
     }
 
-    fn set_element(&mut self, (i, j): (usize, usize), t: T) {
-        assert!(
-            (..self.rows).contains(&i) && (..self.cols).contains(&j),
-            "values are not in bounds"
-        );
-
-        match self.get_row_entries(i).0.binary_search(&j) {
-            Ok(k) => {
-                let l = self.ridx[i] + k;
-                if t.is_zero() {
-                    self.vals.remove(l);
-                    self.cidx.remove(l);
-                    for m in i + 1..=self.rows {
-                        self.ridx[m] -= 1;
-                    }
-                } else {
-                    self.vals[l] = t;
-                }
-            }
-            Err(k) => {
-                if !t.is_zero() {
-                    let l = self.ridx[i] + k;
-                    self.vals.insert(l, t);
-                    self.cidx.insert(l, j);
-                    for m in i + 1..=self.rows {
-                        self.ridx[m] += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    fn identity(n: usize) -> CsrMatrix<T> {
-        CsrMatrix {
-            rows: n,
-            cols: n,
-            vals: repeat_with(|| T::one()).take(n).collect(),
-            cidx: (0..n).map(|i| i).collect(),
-            ridx: (0..=n).map(|i| i).collect(),
-        }
-    }
-
     fn transpose(self) -> CsrMatrix<T> {
         let mut new = CsrMatrix::new(self.cols, self.rows);
         for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
@@ -231,6 +216,26 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
             }
         }
         new
+    }
+
+    fn rows(&self) -> usize {
+        self.rows()
+    }
+
+    fn cols(&self) -> usize {
+        self.cols()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn identity(n: usize) -> Self {
+        Self::identity(n)
+    }
+
+    fn set_element(&mut self, pos: (usize, usize), t: T) {
+        self.set_element(pos, t)
     }
 }
 
@@ -254,17 +259,25 @@ impl<T: Num> Add for CsrMatrix<T> {
         {
             let (mut rcidx, mut rvals) = self.cidx[a..b]
                 .iter()
-                .zip(self.vals[a..b].iter_mut())
-                .merge_join_by(
-                    rhs.cidx[c..d].iter().zip(rhs.vals[c..d].iter_mut()),
-                    |c1, c2| c1.0.cmp(c2.0),
+                .copied()
+                .zip(
+                    self.vals
+                        .splice(a..b, repeat_with(|| T::zero()).take(b - a)),
                 )
-                .map(|eob| match eob {
-                    itertools::EitherOrBoth::Both((&c, t1), (_, t2)) => {
-                        (c, mem::replace(t1, T::zero()) + mem::replace(t2, T::zero()))
+                .merge_join_by(
+                    rhs.cidx[c..d]
+                        .iter()
+                        .copied()
+                        .zip(rhs.vals.splice(c..d, repeat_with(|| T::zero()).take(d - c))),
+                    |(c1, _), (c2, _)| c1.cmp(c2),
+                )
+                .filter_map(|eob| match eob {
+                    itertools::EitherOrBoth::Both((c, t1), (_, t2)) => {
+                        let t = t1 + t2;
+                        (!t.is_zero()).then(|| (c, t))
                     }
-                    itertools::EitherOrBoth::Left((&c, t))
-                    | itertools::EitherOrBoth::Right((&c, t)) => (c, mem::replace(t, T::zero())),
+                    itertools::EitherOrBoth::Left((c, t))
+                    | itertools::EitherOrBoth::Right((c, t)) => Some((c, t)),
                 })
                 .unzip();
 
@@ -357,27 +370,81 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::Wrapping;
+
     use itertools::iproduct;
-    use proptest::test_runner::TestRunner;
+    use proptest::{
+        arbitrary::any,
+        strategy::{Just, Strategy},
+        test_runner::TestRunner,
+    };
 
     use super::CsrMatrix;
     use crate::{
-        arbitrary::{arb_mul_pair, MulPair},
+        arbitrary::{arb_add_pair, arb_mul_pair, AddPair, MulPair},
         dok_matrix::DokMatrix,
         Matrix,
     };
 
+    const MAX_SIZE: usize = 10;
+
+    // base cases
     #[test]
-    fn test_mul_1() {
+    fn new_invariants() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&(1..MAX_SIZE, 1..MAX_SIZE), |(m, n)| {
+                assert!(CsrMatrix::<i8>::new(m, n).csr_invariants());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn identity_invariants() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&(1..MAX_SIZE), |n| {
+                assert!(CsrMatrix::<i8>::identity(n).csr_invariants());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn arb_invariants() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&CsrMatrix::<i8>::arb_matrix(), |m| {
+                assert!(m.csr_invariants());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn from_arb_dok_invariants() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let m = CsrMatrix::from(m);
+                assert!(m.csr_invariants());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    // inductive cases
+    #[test]
+    fn add() {
         let mut runner = TestRunner::default();
         runner
             .run(
-                &arb_mul_pair::<i32, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    assert_eq!(
-                        &CsrMatrix::from(m1.clone()) * &CsrMatrix::from(m2.clone()),
-                        CsrMatrix::from(&m1 * &m2)
-                    );
+                &arb_add_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+                |AddPair(m1, m2)| {
+                    let m = CsrMatrix::from(m1.clone()) + CsrMatrix::from(m2.clone());
+                    assert!(m.csr_invariants());
+                    assert_eq!(m, CsrMatrix::from(m1 + m2));
                     Ok(())
                 },
             )
@@ -385,25 +452,99 @@ mod tests {
     }
 
     #[test]
-    fn test_mul_2() {
+    fn mul() {
         let mut runner = TestRunner::default();
         runner
             .run(
-                &arb_mul_pair::<i32, _, _>(CsrMatrix::arb_fixed_size_matrix),
+                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
-                    let m = &m1.clone() * &m2.clone();
-                    assert!(iproduct!(0..m.rows(), 0..m.cols()).all(|(i, j)| {
-                        m.get_element((i, j)).into_owned()
-                            == (0..m1.cols())
-                                .map(|k| {
-                                    m1.get_element((i, k)).into_owned()
-                                        * m2.get_element((k, j)).into_owned()
-                                })
-                                .sum()
-                    }));
+                    let m = &CsrMatrix::from(m1.clone()) * &CsrMatrix::from(m2.clone());
+                    assert!(m.csr_invariants());
+                    assert_eq!(m, CsrMatrix::from(&m1 * &m2));
                     Ok(())
                 },
             )
+            .unwrap();
+    }
+
+    #[test]
+    fn transpose() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let m1 = CsrMatrix::from(m.clone()).transpose();
+                assert!(m1.csr_invariants());
+                assert_eq!(m1, CsrMatrix::from(m.transpose()));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn set_element() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(
+                &DokMatrix::<i8>::arb_matrix()
+                    .prop_flat_map(|m| (0..m.rows(), 0..m.cols(), Just(m), any::<i8>())),
+                |(i, j, mut m, t)| {
+                    let mut m1 = CsrMatrix::from(m.clone());
+                    m1.set_element((i, j), t);
+                    assert!(m1.csr_invariants());
+                    m.set_element((i, j), t);
+                    assert_eq!(m1, CsrMatrix::from(m));
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
+    // other
+    #[test]
+    fn iter() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let m1 = CsrMatrix::from(m.clone());
+                assert!(m1.iter().eq(m.entries()));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn rows_and_cols() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let m1 = CsrMatrix::from(m.clone());
+                assert_eq!((m.rows(), m.cols()), (m1.rows(), m1.cols()));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn get_element() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let m1 = CsrMatrix::from(m.clone());
+                assert!(iproduct!(0..m.rows(), 0..m.cols())
+                    .all(|pos| m.get_element(pos) == m1.get_element(pos)));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn convert() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                assert_eq!(m, DokMatrix::from(CsrMatrix::from(m.clone())));
+                Ok(())
+            })
             .unwrap();
     }
 }
