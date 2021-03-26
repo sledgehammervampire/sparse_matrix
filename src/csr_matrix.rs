@@ -14,8 +14,6 @@ use std::{
 
 use crate::{dok_matrix::DokMatrix, Matrix};
 
-pub mod invariants;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T> {
     rows: usize,
@@ -110,23 +108,78 @@ impl<T: Arbitrary + Num> CsrMatrix<T> {
     }
 }
 
-impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
-    fn identity(n: usize) -> CsrMatrix<T> {
-        CsrMatrix {
-            rows: n,
-            cols: n,
-            vals: repeat_with(|| T::one()).take(n).collect(),
-            cidx: (0..n).map(|i| i).collect(),
-            ridx: (0..n).map(|i| (i, Slice { start: i, len: 1 })).collect(),
+fn is_increasing(s: &[usize]) -> bool {
+    let mut max = None;
+    for i in s {
+        if Some(i) > max {
+            max = Some(i);
+        } else {
+            return false;
         }
     }
+    true
+}
 
+impl<T: Num> CsrMatrix<T> {
+    pub fn csr_invariants(&self) -> bool {
+        self.csr_invariant_1()
+            && self.csr_invariant_2()
+            && self.csr_invariant_3()
+            && self.csr_invariant_4()
+            && self.csr_invariant_5()
+            && self.csr_invariant_6()
+            && self.csr_invariant_7()
+            && self.csr_invariant_8()
+    }
+
+    fn csr_invariant_1(&self) -> bool {
+        self.ridx
+            .iter()
+            .all(|(i, s1)| self.ridx.range(..i).fold(0, |sum, (_, s2)| sum + s2.len) == s1.start)
+    }
+
+    fn csr_invariant_2(&self) -> bool {
+        self.ridx.values().map(|s| s.len).sum::<usize>() == self.vals.len()
+    }
+
+    fn csr_invariant_3(&self) -> bool {
+        self.cidx.len() == self.vals.len()
+    }
+
+    fn csr_invariant_4(&self) -> bool {
+        self.ridx.values().all(|s| s.len > 0)
+    }
+
+    fn csr_invariant_5(&self) -> bool {
+        self.ridx
+            .values()
+            .all(|s| is_increasing(&self.cidx[s.start..s.start + s.len]))
+    }
+
+    fn csr_invariant_6(&self) -> bool {
+        self.vals.iter().all(|t| !t.is_zero())
+    }
+
+    fn csr_invariant_7(&self) -> bool {
+        self.ridx.keys().all(|r| (0..self.rows).contains(r))
+    }
+
+    fn csr_invariant_8(&self) -> bool {
+        self.cidx.iter().all(|c| (0..self.cols).contains(c))
+    }
+}
+
+impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
     fn rows(&self) -> usize {
         self.rows
     }
 
     fn cols(&self) -> usize {
         self.cols
+    }
+
+    fn len(&self) -> usize {
+        self.cidx.len()
     }
 
     fn get_element(&self, (i, j): (usize, usize)) -> Cow<T> {
@@ -212,6 +265,16 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
             );
             self.vals.push(t);
             self.cidx.push(j);
+        }
+    }
+
+    fn identity(n: usize) -> CsrMatrix<T> {
+        CsrMatrix {
+            rows: n,
+            cols: n,
+            vals: repeat_with(|| T::one()).take(n).collect(),
+            cidx: (0..n).map(|i| i).collect(),
+            ridx: (0..n).map(|i| (i, Slice { start: i, len: 1 })).collect(),
         }
     }
 

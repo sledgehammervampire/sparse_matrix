@@ -7,7 +7,6 @@ use proptest::{
 
 use crate::{
     arbitrary::{arb_add_pair, arb_mul_pair, AddPair, MulPair},
-    csr_matrix::invariants::csr_invariants,
     csr_matrix::CsrMatrix,
     dok_matrix::DokMatrix,
     Matrix,
@@ -18,7 +17,7 @@ fn test_csr_invariants() {
     let mut runner = TestRunner::default();
     runner
         .run(&CsrMatrix::<i32>::arb_matrix(), |m| {
-            assert!(csr_invariants(&m));
+            assert!(m.csr_invariants());
             Ok(())
         })
         .unwrap();
@@ -30,7 +29,7 @@ fn test_dok_invariants() {
     runner
         .run(&DokMatrix::<i32>::arb_matrix(), |m| {
             let m = CsrMatrix::from(m);
-            assert!(csr_invariants(&m));
+            assert!(m.csr_invariants());
             Ok(())
         })
         .unwrap();
@@ -45,7 +44,7 @@ fn test_set_element_1() {
                 .prop_flat_map(|m| (0..m.rows(), 0..m.cols(), Just(m), any::<i32>())),
             |(i, j, mut m, t)| {
                 m.set_element((i, j), t);
-                assert!(csr_invariants(&m));
+                assert!(m.csr_invariants());
                 Ok(())
             },
         )
@@ -67,7 +66,7 @@ fn test_set_element_2() {
             }),
             |(i, j, mut m, t)| {
                 m.set_element((i, j), t);
-                assert!(csr_invariants(&m));
+                assert!(m.csr_invariants());
                 Ok(())
             },
         )

@@ -1,1 +1,4 @@
 /target
+/matrices
+perf.data*
+*.svg

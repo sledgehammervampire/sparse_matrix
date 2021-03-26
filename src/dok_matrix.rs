@@ -1,4 +1,4 @@
-use crate::{arbitrary::arb_matrix, csr_matrix::CsrMatrix, Matrix};
+use crate::{arbitrary::arb_matrix, Matrix};
 use itertools::Itertools;
 use nom::IResult;
 use num::{traits::NumAssignRef, Num};
@@ -48,9 +48,15 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
     fn rows(&self) -> usize {
         self.rows
     }
+
     fn cols(&self) -> usize {
         self.cols
     }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     fn get_element(&self, pos: (usize, usize)) -> Cow<T> {
         self.entries
             .get(&pos)
@@ -149,8 +155,18 @@ impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-impl<T: Num + Clone> From<CsrMatrix<T>> for DokMatrix<T> {
-    fn from(old: CsrMatrix<T>) -> Self {
+impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
+    fn from(old: crate::csr_matrix::CsrMatrix<T>) -> Self {
+        DokMatrix {
+            rows: old.rows(),
+            cols: old.cols(),
+            entries: old.iter().map(|(i, t)| (i, t.clone())).collect(),
+        }
+    }
+}
+
+impl<T: Num + Clone> From<crate::csr_matrix2::CsrMatrix<T>> for DokMatrix<T> {
+    fn from(old: crate::csr_matrix2::CsrMatrix<T>) -> Self {
         DokMatrix {
             rows: old.rows(),
             cols: old.cols(),
