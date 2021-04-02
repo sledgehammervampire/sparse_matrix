@@ -1,6 +1,5 @@
 use itertools::{iproduct, Itertools};
 use num::Num;
-use proptest::{arbitrary::Arbitrary, sample::subsequence, strategy::Strategy};
 use rayon::{iter::ParallelIterator, prelude::*};
 use std::{
     borrow::Cow,
@@ -12,20 +11,22 @@ use std::{
     vec,
 };
 
-use crate::{Matrix, dok_matrix::DokMatrix, is_increasing};
+use crate::{dok_matrix::DokMatrix, Matrix};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T> {
     rows: usize,
     cols: usize,
-    // for v in vals, vals != 0
     vals: Vec<T>,
     cidx: Vec<usize>,
-    ridx: BTreeMap<usize, Slice>,
+    ridx: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Slice {
+struct Slice {
     pub start: usize,
     pub len: usize,
 }
@@ -36,128 +37,93 @@ impl From<Slice> for Range<usize> {
     }
 }
 
-impl<T> CsrMatrix<T> {
-    pub fn new_square(n: usize) -> CsrMatrix<T> {
-        CsrMatrix::new(n, n)
-    }
-
-    pub fn new(rows: usize, cols: usize) -> CsrMatrix<T> {
-        assert!(
-            rows > 0 && cols > 0,
-            "number of rows and columns must be greater than 0"
-        );
-
-        let capacity = 1000.min(rows * cols / 5);
-        CsrMatrix {
-            rows,
-            cols,
-            vals: Vec::with_capacity(capacity),
-            cidx: Vec::with_capacity(capacity),
-            ridx: BTreeMap::new(),
+fn is_sorted(s: &[usize]) -> bool {
+    let mut max = None;
+    for i in s {
+        if Some(i) >= max {
+            max = Some(i);
+        } else {
+            return false;
         }
     }
-
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = ((usize, usize), &T)> {
-        let Self {
-            ridx, cidx, vals, ..
-        } = self;
-        ridx.iter().flat_map(move |(&r, &s)| {
-            cidx[Range::from(s)]
-                .iter()
-                .copied()
-                .zip(vals[Range::from(s)].iter())
-                .map(move |(c, t)| ((r, c), t))
-        })
-    }
+    true
 }
 
-impl<T: Arbitrary + Num> CsrMatrix<T> {
-    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl Strategy<Value = Self> {
-        repeat_with(|| subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
-            .take(rows)
-            .collect::<Vec<_>>()
-            .prop_flat_map(move |cidx| {
-                let (mut cidx_flattened, mut ridx) = (vec![], BTreeMap::new());
-                for (i, mut rcidx) in cidx.into_iter().enumerate() {
-                    if rcidx.len() > 0 {
-                        ridx.insert(
-                            i,
-                            Slice {
-                                start: cidx_flattened.len(),
-                                len: rcidx.len(),
-                            },
-                        );
-                        cidx_flattened.append(&mut rcidx);
-                    }
-                }
-                repeat_with(|| T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()))
-                    .take(cidx_flattened.len())
-                    .collect::<Vec<_>>()
-                    .prop_map(move |vals| CsrMatrix {
-                        rows,
-                        cols,
-                        vals,
-                        cidx: cidx_flattened.clone(),
-                        ridx: ridx.clone(),
-                    })
-            })
+fn is_increasing(s: &[usize]) -> bool {
+    let mut max = None;
+    for i in s {
+        if Some(i) > max {
+            max = Some(i);
+        } else {
+            return false;
+        }
     }
-
-    pub fn arb_matrix() -> impl Strategy<Value = Self> {
-        crate::arbitrary::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
-    }
+    true
 }
 
 impl<T: Num> CsrMatrix<T> {
-    pub fn csr_invariants(&self) -> bool {
-        self.csr_invariant_1()
-            && self.csr_invariant_2()
-            && self.csr_invariant_3()
-            && self.csr_invariant_4()
-            && self.csr_invariant_5()
-            && self.csr_invariant_6()
-            && self.csr_invariant_7()
-            && self.csr_invariant_8()
+    fn get_row_entries(&self, i: usize) -> (&[usize], &[T]) {
+        let (j, k) = (self.ridx[i], self.ridx[i + 1]);
+        (&self.cidx[j..k], &self.vals[j..k])
     }
 
-    fn csr_invariant_1(&self) -> bool {
-        self.ridx
-            .iter()
-            .all(|(i, s1)| self.ridx.range(..i).fold(0, |sum, (_, s2)| sum + s2.len) == s1.start)
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = ((usize, usize), &T)> {
+        (0..self.rows).flat_map(move |r| {
+            let (cidx, vals) = self.get_row_entries(r);
+            cidx.iter()
+                .copied()
+                .zip(vals.iter())
+                .map(move |(c, t)| ((r, c), t))
+        })
     }
 
-    fn csr_invariant_2(&self) -> bool {
-        self.ridx.values().map(|s| s.len).sum::<usize>() == self.vals.len()
+    pub fn invariants(&self) -> bool {
+        self.invariant1()
+            && self.invariant2()
+            && self.invariant3()
+            && self.invariant4()
+            && self.invariant5()
+            && self.invariant6()
     }
 
-    fn csr_invariant_3(&self) -> bool {
+    fn invariant1(&self) -> bool {
         self.cidx.len() == self.vals.len()
     }
 
-    fn csr_invariant_4(&self) -> bool {
-        self.ridx.values().all(|s| s.len > 0)
+    fn invariant2(&self) -> bool {
+        self.ridx.len() == self.rows + 1 && self.ridx[self.rows] == self.cidx.len()
     }
 
-    fn csr_invariant_5(&self) -> bool {
-        self.ridx
-            .values()
-            .all(|s| is_increasing(&self.cidx[s.start..s.start + s.len]))
+    fn invariant3(&self) -> bool {
+        is_sorted(&self.ridx)
     }
 
-    fn csr_invariant_6(&self) -> bool {
+    fn invariant4(&self) -> bool {
         self.vals.iter().all(|t| !t.is_zero())
     }
 
-    fn csr_invariant_7(&self) -> bool {
-        self.ridx.keys().all(|r| (0..self.rows).contains(r))
-    }
-
-    fn csr_invariant_8(&self) -> bool {
+    fn invariant5(&self) -> bool {
         self.cidx.iter().all(|c| (0..self.cols).contains(c))
     }
-}
 
-impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
+    fn invariant6(&self) -> bool {
+        self.ridx
+            .iter()
+            .copied()
+            .tuple_windows()
+            .all(|(a, b)| is_increasing(&self.cidx[a..b]))
+    }
+
+    fn transpose(mut self) -> CsrMatrix<T> {
+        let mut new = CsrMatrix::new(self.cols, self.rows);
+        for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
+            if let Some(t) = self.set_element((i, j), T::zero()) {
+                new.set_element((j, i), t);
+            }
+        }
+        new
+    }
+
     fn rows(&self) -> usize {
         self.rows
     }
@@ -166,114 +132,108 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
         self.cols
     }
 
-    fn len(&self) -> usize {
+    fn nnz(&self) -> usize {
         self.cidx.len()
     }
 
+    fn identity(n: usize) -> Self {
+        CsrMatrix {
+            rows: n,
+            cols: n,
+            vals: repeat_with(|| T::one()).take(n).collect(),
+            cidx: (0..n).map(|i| i).collect(),
+            ridx: (0..=n).map(|i| i).collect(),
+        }
+    }
+
+    fn set_element(&mut self, (i, j): (usize, usize), t: T) -> Option<T> {
+        assert!(i < self.rows && j < self.cols, "position not in bounds");
+
+        match self.get_row_entries(i).0.binary_search(&j) {
+            Ok(k) => {
+                let l = self.ridx[i] + k;
+                if t.is_zero() {
+                    self.cidx.remove(l);
+                    for m in i+1..=self.rows  {
+                        self.ridx[m] -= 1;
+                    }
+                    Some(self.vals.remove(l))
+                } else {
+                    Some(mem::replace(&mut self.vals[l], t))
+                }
+            }
+            Err(k) => {
+                if !t.is_zero() {
+                    let l = self.ridx[i] + k;
+                    self.vals.insert(l, t);
+                    self.cidx.insert(l, j);
+                    for m in i + 1..=self.rows {
+                        self.ridx[m] += 1;
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    fn new(rows: usize, cols: usize) -> CsrMatrix<T> {
+        let capacity = 1000.min(rows * cols / 5);
+        CsrMatrix {
+            rows,
+            cols,
+            vals: Vec::with_capacity(capacity),
+            cidx: Vec::with_capacity(capacity),
+            ridx: vec![0; rows + 1],
+        }
+    }
+
+    fn new_square(n: usize) -> CsrMatrix<T> {
+        Self::new(n, n)
+    }
+}
+
+impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
     fn get_element(&self, (i, j): (usize, usize)) -> Cow<T> {
         assert!(
             (..self.rows).contains(&i) && (..self.cols).contains(&j),
             "values are not in bounds"
         );
 
-        self.ridx.get(&i).map_or_else(
-            || Cow::Owned(T::zero()),
-            |&s| {
-                self.cidx[Range::from(s)].binary_search(&j).map_or_else(
-                    |_| Cow::Owned(T::zero()),
-                    |k| Cow::Borrowed(&self.vals[s.start + k]),
-                )
-            },
-        )
+        let (cidx, vals) = self.get_row_entries(i);
+        cidx.binary_search(&j)
+            .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
     }
 
-    fn set_element(&mut self, (i, j): (usize, usize), t: T) {
-        assert!(
-            (..self.rows).contains(&i) && (..self.cols).contains(&j),
-            "values are not in bounds"
-        );
-
-        let mut iter = self.ridx.range_mut(i..);
-        if let Some((&i1, Slice { start, len })) = iter.next() {
-            if i == i1 {
-                match self.cidx[*start..*start + *len].binary_search(&j) {
-                    Ok(k) => {
-                        let l = *start + k;
-                        if t.is_zero() {
-                            self.vals.remove(l);
-                            self.cidx.remove(l);
-                            *len -= 1;
-                            for (_, Slice { start, .. }) in iter {
-                                *start -= 1;
-                            }
-                            if *len == 0 {
-                                self.ridx.remove(&i);
-                            }
-                        } else {
-                            self.vals[l] = t;
-                        }
-                    }
-                    Err(k) => {
-                        if !t.is_zero() {
-                            let l = *start + k;
-                            self.vals.insert(l, t);
-                            self.cidx.insert(l, j);
-                            *len += 1;
-                            for (_, Slice { start, .. }) in iter {
-                                *start += 1;
-                            }
-                        }
-                    }
-                }
-            } else if !t.is_zero() {
-                self.vals.insert(*start, t);
-                self.cidx.insert(*start, j);
-                let prev_start = *start;
-                *start += 1;
-                for (_, Slice { start, .. }) in iter {
-                    *start += 1;
-                }
-                // we insert after consuming iter to avoid overlapping mutable borrows
-                self.ridx.insert(
-                    i,
-                    Slice {
-                        start: prev_start,
-                        len: 1,
-                    },
-                );
-            }
-        } else if !t.is_zero() {
-            // note that push changes self.vals.len, so we must insert first
-            self.ridx.insert(
-                i,
-                Slice {
-                    start: self.vals.len(),
-                    len: 1,
-                },
-            );
-            self.vals.push(t);
-            self.cidx.push(j);
-        }
+    fn new(rows: usize, cols: usize) -> Self {
+        Self::new(rows, cols)
     }
 
-    fn identity(n: usize) -> CsrMatrix<T> {
-        CsrMatrix {
-            rows: n,
-            cols: n,
-            vals: repeat_with(|| T::one()).take(n).collect(),
-            cidx: (0..n).map(|i| i).collect(),
-            ridx: (0..n).map(|i| (i, Slice { start: i, len: 1 })).collect(),
-        }
+    fn new_square(n: usize) -> Self {
+        Self::new_square(n)
     }
 
-    fn transpose(self) -> CsrMatrix<T> {
-        let mut new = CsrMatrix::new(self.cols, self.rows);
-        for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
-            if let Cow::Borrowed(t) = self.get_element((i, j)) {
-                new.set_element((j, i), t.clone());
-            }
-        }
-        new
+    fn rows(&self) -> usize {
+        self.rows()
+    }
+
+    fn cols(&self) -> usize {
+        self.cols()
+    }
+
+    fn nnz(&self) -> usize {
+        self.nnz()
+    }
+
+    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T> {
+        self.set_element(pos, t)
+    }
+
+    fn identity(n: usize) -> Self {
+        Self::identity(n)
+    }
+
+    fn transpose(self) -> Self {
+        self.transpose()
     }
 }
 
@@ -286,91 +246,42 @@ impl<T: Num> Add for CsrMatrix<T> {
             (rhs.rows, rhs.cols),
             "matrices must have identical dimensions"
         );
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
 
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], BTreeMap::new());
-
-        for row in self.ridx.iter().map(|(r, s)| (*r, *s)).merge_join_by(
-            rhs.ridx.iter().map(|(r, s)| (*r, *s)),
-            |(r1, _), (r2, _)| r1.cmp(r2),
-        ) {
-            let prev_len = cidx.len();
-            match row {
-                itertools::EitherOrBoth::Both((r, s1), (_, s2)) => {
-                    let mut len = 0;
-                    for (c, t) in self.cidx[Range::from(s1)]
+        for ((a, b), (c, d)) in self
+            .ridx
+            .iter()
+            .copied()
+            .tuple_windows()
+            .zip(rhs.ridx.iter().copied().tuple_windows())
+        {
+            let (mut rcidx, mut rvals) = self.cidx[a..b]
+                .iter()
+                .copied()
+                .zip(
+                    self.vals
+                        .splice(a..b, repeat_with(|| T::zero()).take(b - a)),
+                )
+                .merge_join_by(
+                    rhs.cidx[c..d]
                         .iter()
                         .copied()
-                        .zip(
-                            self.vals
-                                .splice(Range::from(s1), repeat_with(|| T::zero()).take(s1.len)),
-                        )
-                        .merge_join_by(
-                            rhs.cidx[Range::from(s2)].iter().copied().zip(
-                                rhs.vals.splice(
-                                    Range::from(s2),
-                                    repeat_with(|| T::zero()).take(s2.len),
-                                ),
-                            ),
-                            |(c1, _), (c2, _)| c1.cmp(c2),
-                        )
-                        .filter_map(|eob| match eob {
-                            itertools::EitherOrBoth::Both((c, t1), (_, t2)) => {
-                                let t = t1 + t2;
-                                (!t.is_zero()).then(|| (c, t))
-                            }
-                            itertools::EitherOrBoth::Left((c, t))
-                            | itertools::EitherOrBoth::Right((c, t)) => Some((c, t)),
-                        })
-                    {
-                        vals.push(t);
-                        cidx.push(c);
-                        len += 1;
+                        .zip(rhs.vals.splice(c..d, repeat_with(|| T::zero()).take(d - c))),
+                    |(c1, _), (c2, _)| c1.cmp(c2),
+                )
+                .filter_map(|eob| match eob {
+                    itertools::EitherOrBoth::Both((c, t1), (_, t2)) => {
+                        let t = t1 + t2;
+                        (!t.is_zero()).then(|| (c, t))
                     }
-                    if len > 0 {
-                        ridx.insert(
-                            r,
-                            Slice {
-                                start: prev_len,
-                                len,
-                            },
-                        );
-                    }
-                }
-                itertools::EitherOrBoth::Left((r, s)) => {
-                    ridx.insert(
-                        r,
-                        Slice {
-                            start: prev_len,
-                            len: s.len,
-                        },
-                    );
-                    vals.extend(
-                        self.vals
-                            .splice(Range::from(s), repeat_with(|| T::zero()).take(s.len)),
-                    );
-                    cidx.extend(
-                        self.cidx
-                            .splice(Range::from(s), repeat_with(|| 0).take(s.len)),
-                    );
-                }
-                itertools::EitherOrBoth::Right((r, s)) => {
-                    ridx.insert(
-                        r,
-                        Slice {
-                            start: prev_len,
-                            len: s.len,
-                        },
-                    );
-                    vals.extend(
-                        rhs.vals
-                            .splice(Range::from(s), repeat_with(|| T::zero()).take(s.len)),
-                    );
-                    cidx.extend(
-                        rhs.cidx
-                            .splice(Range::from(s), repeat_with(|| 0).take(s.len)),
-                    );
-                }
-            }
+                    itertools::EitherOrBoth::Left((c, t))
+                    | itertools::EitherOrBoth::Right((c, t)) => Some((c, t)),
+                })
+                .unzip();
+
+            vals.append(&mut rvals);
+            cidx.append(&mut rcidx);
+            ridx.push(vals.len());
         }
 
         CsrMatrix {
@@ -389,50 +300,35 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     fn mul(self, rhs: Self) -> Self::Output {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
-        let rows: BTreeMap<_, _> = self
-            .ridx
+        let mut rows: Vec<(Vec<usize>, Vec<T>)> = vec![];
+        self.ridx
             .par_iter()
-            .filter_map(|(&r, &s)| {
+            .zip(self.ridx.par_iter().skip(1))
+            .map(|(&a, &b)| {
                 let mut row = BTreeMap::new();
 
-                for (&k, t) in self.cidx[Range::from(s)]
-                    .iter()
-                    .zip(self.vals[Range::from(s)].iter())
-                {
-                    if let Some(&s) = rhs.ridx.get(&k) {
-                        for (&j, t1) in rhs.cidx[Range::from(s)]
-                            .iter()
-                            .zip(rhs.vals[Range::from(s)].iter())
-                        {
-                            let entry = row.entry(j).or_insert(T::zero());
-                            *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
-                        }
+                for (&k, t) in self.cidx[a..b].iter().zip(self.vals[a..b].iter()) {
+                    let (rcidx, rvals) = rhs.get_row_entries(k);
+                    for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
+                        let entry = row.entry(j).or_insert(T::zero());
+                        *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
                     }
                 }
-                let (rcidx, rvals): (Vec<usize>, Vec<T>) =
-                    row.into_iter().filter(|(_, t)| !t.is_zero()).unzip();
-                (rcidx.len() > 0).then(|| (r, (rcidx, rvals)))
+
+                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
             })
-            .collect();
-
-        let (mut cidx, mut vals, mut ridx) = (vec![], vec![], BTreeMap::new());
-        for (r, (mut rcidx, mut rvals)) in rows {
-            ridx.insert(
-                r,
-                Slice {
-                    start: cidx.len(),
-                    len: rcidx.len(),
-                },
-            );
-            cidx.append(&mut rcidx);
-            vals.append(&mut rvals);
+            .collect_into_vec(&mut rows);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+        for (rcidx, rvals) in rows {
+            ridx.push(ridx.last().unwrap() + rcidx.len());
+            vals.extend(rvals);
+            cidx.extend(rcidx);
         }
-
         CsrMatrix {
             rows: self.rows,
             cols: rhs.cols,
-            cidx,
             vals,
+            cidx,
             ridx,
         }
     }
@@ -441,19 +337,22 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
 impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
     fn from(old: DokMatrix<T>) -> Self {
         let (rows, cols) = (old.rows(), old.cols());
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], BTreeMap::new());
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
         // note that (i, j) is iterated in lexicographic order
         for ((i, j), t) in old {
-            if !t.is_zero() {
-                ridx.entry(i)
-                    .or_insert(Slice {
-                        start: vals.len(),
-                        len: 0,
-                    })
-                    .len += 1;
-                vals.push(t);
-                cidx.push(j);
+            vals.push(t);
+            cidx.push(j);
+            if let None = ridx.get(i + 1) {
+                let &k = ridx.last().unwrap();
+                for _ in ridx.len()..=i + 1 {
+                    ridx.push(k);
+                }
             }
+            ridx[i + 1] += 1;
+        }
+        let &k = ridx.last().unwrap();
+        for _ in ridx.len()..=rows {
+            ridx.push(k);
         }
         CsrMatrix {
             rows,

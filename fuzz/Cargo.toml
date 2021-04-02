@@ -1,0 +1,51 @@
+
+[package]
+name = "spam-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.spam]
+path = ".."
+features = ["arbitrary_impl"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "arb_dok_invariants"
+path = "fuzz_targets/arb_dok_invariants.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "arb_csr_invariants"
+path = "fuzz_targets/arb_csr_invariants.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "set_element"
+path = "fuzz_targets/set_element.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "add"
+path = "fuzz_targets/add.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "mul"
+path = "fuzz_targets/mul.rs"
+test = false
+doc = false

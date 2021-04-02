@@ -1,44 +1,29 @@
 use std::borrow::Cow;
 
-pub mod arbitrary;
-pub mod csr_matrix;
-pub mod csr_matrix2;
-pub mod dok_matrix;
-
 #[cfg(test)]
-mod tests;
+pub mod proptest;
+pub mod csr_matrix;
+pub mod dok_matrix;
+#[cfg(feature = "arbitrary_impl")]
+mod arbitrary;
 
 pub trait Matrix<T: ToOwned> {
+    fn new(rows: usize, cols: usize) -> Self;
+    fn new_square(n: usize) -> Self;
     fn rows(&self) -> usize;
     fn cols(&self) -> usize;
     // the number of nonzero entries in the matrix
-    fn len(&self) -> usize;
+    fn nnz(&self) -> usize;
     fn get_element(&self, pos: (usize, usize)) -> Cow<T>;
-    fn set_element(&mut self, pos: (usize, usize), t: T);
+    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T>;
     fn identity(n: usize) -> Self;
     fn transpose(self) -> Self;
 }
 
-fn is_sorted(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) >= max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
-}
+// pair of matrices conformable for addition
+#[derive(Clone, Debug)]
+pub struct AddPair<M>(pub M, pub M);
 
-fn is_increasing(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) > max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
-}
+// pair of matrices conformable for multiplication
+#[derive(Clone, Debug)]
+pub struct MulPair<M>(pub M, pub M);

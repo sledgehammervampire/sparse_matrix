@@ -1,14 +1,16 @@
-use crate::{arbitrary::arb_matrix, Matrix};
+use crate::Matrix;
 use itertools::Itertools;
 use nom::IResult;
-use num::{traits::NumAssignRef, Num};
-use proptest::{arbitrary::Arbitrary, prelude::*, strategy::Strategy};
+use num::Num;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
     ops::{Add, Mul},
     str::FromStr,
 };
+
+#[cfg(test)]
+mod tests;
 
 // a dumb matrix implementation to test against
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -18,57 +20,17 @@ pub struct DokMatrix<T> {
     entries: BTreeMap<(usize, usize), T>,
 }
 
-impl<T: Num + Clone> DokMatrix<T> {
-    // output entries with (row, col) lexicographically ordered
-    pub fn entries(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
-        self.entries.iter().map(|(&p, t)| (p, t))
-    }
-}
-
-impl<T: Arbitrary + Num> DokMatrix<T> {
-    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl Strategy<Value = Self> {
-        prop::collection::btree_map(
-            (0..rows, 0..cols),
-            T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()),
-            0..=(rows * cols),
-        )
-        .prop_map(move |entries| DokMatrix {
+impl<T: Num> DokMatrix<T> {
+    fn new(rows: usize, cols: usize) -> Self {
+        DokMatrix {
             rows,
             cols,
-            entries,
-        })
-    }
-
-    pub fn arb_matrix() -> impl Strategy<Value = Self> {
-        arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
-    }
-}
-
-impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
-    fn rows(&self) -> usize {
-        self.rows
-    }
-
-    fn cols(&self) -> usize {
-        self.cols
-    }
-
-    fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    fn get_element(&self, pos: (usize, usize)) -> Cow<T> {
-        self.entries
-            .get(&pos)
-            .map_or(Cow::Owned(T::zero()), Cow::Borrowed)
-    }
-
-    fn set_element(&mut self, pos: (usize, usize), t: T) {
-        if t.is_zero() {
-            self.entries.remove(&pos);
-        } else {
-            self.entries.insert(pos, t);
+            entries: BTreeMap::new(),
         }
+    }
+
+    fn new_square(n: usize) -> Self {
+        Self::new(n, n)
     }
 
     fn identity(n: usize) -> Self {
@@ -89,6 +51,75 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
                 .map(|((i, j), t)| ((j, i), t))
                 .collect(),
         }
+    }
+
+    fn rows(&self) -> usize {
+        self.rows
+    }
+
+    fn cols(&self) -> usize {
+        self.cols
+    }
+
+    fn nnz(&self) -> usize {
+        self.entries.len()
+    }
+    // output entries with (row, col) lexicographically ordered
+    pub fn entries(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
+        self.entries.iter().map(|(&p, t)| (p, t))
+    }
+
+    pub fn invariants(&self) -> bool {
+        self.entries()
+            .all(|((r, c), t)| r < self.rows && c < self.cols && !t.is_zero())
+    }
+
+    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T> {
+        if t.is_zero() {
+            self.entries.remove(&pos)
+        } else {
+            self.entries.insert(pos, t)
+        }
+    }
+}
+
+impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
+    fn new(rows: usize, cols: usize) -> Self {
+        Self::new(rows, cols)
+    }
+
+    fn new_square(n: usize) -> Self {
+        Self::new_square(n)
+    }
+
+    fn rows(&self) -> usize {
+        self.rows()
+    }
+
+    fn cols(&self) -> usize {
+        self.cols()
+    }
+
+    fn nnz(&self) -> usize {
+        self.nnz()
+    }
+
+    fn get_element(&self, pos: (usize, usize)) -> Cow<T> {
+        self.entries
+            .get(&pos)
+            .map_or(Cow::Owned(T::zero()), Cow::Borrowed)
+    }
+
+    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T> {
+        self.set_element(pos, t)
+    }
+
+    fn identity(n: usize) -> Self {
+        Self::identity(n)
+    }
+
+    fn transpose(self) -> Self {
+        self.transpose()
     }
 }
 
@@ -130,7 +161,7 @@ impl<T: Num> Add for DokMatrix<T> {
     }
 }
 
-impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
+impl<T: Num + Clone> Mul for &DokMatrix<T> {
     type Output = DokMatrix<T>;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -139,12 +170,11 @@ impl<T: NumAssignRef + Clone> Mul for &DokMatrix<T> {
         let mut entries = BTreeMap::new();
         for i in 0..self.rows {
             for j in 0..rhs.cols {
-                let t = (0..self.cols).fold(T::zero(), |mut s, k| {
-                    let mut t = self.entries.get(&(i, k)).unwrap_or(&T::zero()).clone();
-                    t *= rhs.entries.get(&(k, j)).unwrap_or(&T::zero());
-                    s += t;
-                    s
-                });
+                let mut t = T::zero();
+                for k in 0..self.cols {
+                    t = t + self.get_element((i, k)).into_owned()
+                        * rhs.get_element((k, j)).into_owned();
+                }
                 if !t.is_zero() {
                     entries.insert((i, j), t);
                 }
@@ -169,17 +199,7 @@ impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
     }
 }
 
-impl<T: Num + Clone> From<crate::csr_matrix2::CsrMatrix<T>> for DokMatrix<T> {
-    fn from(old: crate::csr_matrix2::CsrMatrix<T>) -> Self {
-        DokMatrix {
-            rows: old.rows(),
-            cols: old.cols(),
-            entries: old.iter().map(|(i, t)| (i, t.clone())).collect(),
-        }
-    }
-}
-
-pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, DokMatrix<T>> {
+pub fn parse_matrix_market<T: FromStr + Clone + Num>(input: &str) -> IResult<&str, DokMatrix<T>> {
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -249,9 +269,11 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
                 matrix_entry::<T>,
                 BTreeMap::new(),
                 |mut entries, (r, c, t)| {
-                    // matrix market format is 1-indexed, but our matrix is 0-indexed
-                    entries.insert((r - 1, c - 1), t.clone());
-                    entries.insert((c - 1, r - 1), t);
+                    if !t.is_zero() {
+                        // matrix market format is 1-indexed, but our matrix is 0-indexed
+                        entries.insert((r - 1, c - 1), t.clone());
+                        entries.insert((c - 1, r - 1), t);
+                    }
                     entries
                 },
             )(input)?;
@@ -269,8 +291,10 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
                 matrix_entry::<T>,
                 BTreeMap::new(),
                 |mut entries, (r, c, t)| {
-                    // matrix market format is 1-indexed, but our matrix is 0-indexed
-                    entries.insert((r - 1, c - 1), t.clone());
+                    if !t.is_zero() {
+                        // matrix market format is 1-indexed, but our matrix is 0-indexed
+                        entries.insert((r - 1, c - 1), t.clone());
+                    }
                     entries
                 },
             )(input)?;
@@ -286,198 +310,5 @@ pub fn parse_matrix_market<T: FromStr + Clone>(input: &str) -> IResult<&str, Dok
         _ => {
             unimplemented!("matrix shape {} unsupported", shape);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::DokMatrix;
-    use crate::{csr_matrix::CsrMatrix, Matrix};
-
-    #[test]
-    fn test_1() {
-        assert_eq!(
-            DokMatrix::from(CsrMatrix::identity(2)),
-            DokMatrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![((0, 0), 1), ((1, 1), 1)].into_iter().collect()
-            }
-        )
-    }
-
-    #[test]
-    fn test_2() {
-        assert_eq!(
-            CsrMatrix::from({
-                let entries = vec![((0, 0), 1), ((1, 1), 1)].into_iter().collect();
-                DokMatrix {
-                    rows: 2,
-                    cols: 2,
-                    entries,
-                }
-            }),
-            CsrMatrix::identity(2)
-        );
-    }
-    #[test]
-    fn test_3() {
-        assert_eq!(
-            CsrMatrix::identity(3) + CsrMatrix::identity(3),
-            CsrMatrix::from(DokMatrix {
-                rows: 3,
-                cols: 3,
-                entries: vec![((0, 0), 2), ((1, 1), 2), ((2, 2), 2)]
-                    .into_iter()
-                    .collect()
-            })
-        )
-    }
-
-    #[test]
-    fn test_4() {
-        assert_eq!(
-            {
-                let mut m = CsrMatrix::identity(2);
-                m.set_element((0, 1), 1);
-                m
-            },
-            CsrMatrix::from(DokMatrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![((0, 0), 1), ((0, 1), 1), ((1, 1), 1)]
-                    .into_iter()
-                    .collect()
-            })
-        )
-    }
-
-    #[test]
-    fn test_5() {
-        assert_eq!(
-            {
-                let mut m = CsrMatrix::from(DokMatrix {
-                    rows: 2,
-                    cols: 2,
-                    entries: vec![((0, 0), 1), ((0, 1), 1), ((1, 1), 1)]
-                        .into_iter()
-                        .collect(),
-                });
-                m.set_element((0, 1), 0);
-                m
-            },
-            CsrMatrix::identity(2)
-        )
-    }
-
-    #[test]
-    fn test_6() {
-        assert_eq!(
-            {
-                let mut m = CsrMatrix::from(DokMatrix {
-                    rows: 2,
-                    cols: 2,
-                    entries: vec![((0, 0), 1), ((0, 1), 1), ((1, 1), 1)]
-                        .into_iter()
-                        .collect(),
-                });
-                m.set_element((0, 1), 2);
-                m
-            },
-            CsrMatrix::from(DokMatrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![((0, 0), 1), ((0, 1), 2), ((1, 1), 1)]
-                    .into_iter()
-                    .collect(),
-            })
-        )
-    }
-
-    #[test]
-    fn test_7() {
-        assert_eq!(
-            {
-                let mut m = CsrMatrix::from(DokMatrix {
-                    rows: 2,
-                    cols: 2,
-                    entries: vec![((0, 0), 1), ((1, 1), 1)].into_iter().collect(),
-                });
-                m.set_element((0, 1), 0);
-                m
-            },
-            CsrMatrix::identity(2)
-        )
-    }
-
-    #[test]
-    fn test_8() {
-        assert_eq!(
-            {
-                let mut m = CsrMatrix::identity(2);
-                m.set_element((0, 0), 0);
-                m.set_element((1, 1), 0);
-                m
-            },
-            CsrMatrix::from(DokMatrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![].into_iter().collect()
-            })
-        )
-    }
-
-    #[test]
-    fn test_9() {
-        assert_eq!(
-            &CsrMatrix::<i32>::identity(2) * &CsrMatrix::identity(2),
-            CsrMatrix::identity(2)
-        )
-    }
-
-    #[test]
-    fn test_10() {
-        assert_eq!(
-            {
-                let m = CsrMatrix::from(DokMatrix {
-                    rows: 2,
-                    cols: 2,
-                    entries: vec![((0, 1), 1)].into_iter().collect(),
-                });
-                &m * &m.clone()
-            },
-            {
-                CsrMatrix::from(DokMatrix {
-                    rows: 2,
-                    cols: 2,
-                    entries: vec![].into_iter().collect(),
-                })
-            }
-        )
-    }
-
-    #[test]
-    fn test_11() {
-        assert_eq!(
-            CsrMatrix::<i32>::identity(3),
-            CsrMatrix::identity(3).transpose()
-        )
-    }
-
-    #[test]
-    fn test_12() {
-        assert_eq!(
-            CsrMatrix::from(DokMatrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![((0, 1), 1)].into_iter().collect()
-            })
-            .transpose(),
-            CsrMatrix::from(DokMatrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![((1, 0), 1)].into_iter().collect()
-            })
-        )
     }
 }
