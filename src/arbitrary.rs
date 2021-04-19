@@ -48,7 +48,7 @@ impl<'a, T: Arbitrary<'a> + Num + Clone> Arbitrary<'a> for AddPair<DokMatrix<T>>
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         let rows = u.arbitrary_len::<T>()?;
         let cols = u.arbitrary_len::<T>()?;
-        Ok(arb_add_pair_fixed_size(u, rows, cols)?)
+        arb_add_pair_fixed_size(u, rows, cols)
     }
 }
 
@@ -76,7 +76,7 @@ impl<'a, T: Arbitrary<'a> + Num + Clone> Arbitrary<'a> for MulPair<DokMatrix<T>>
         let l = u.arbitrary_len::<T>()?;
         let m = u.arbitrary_len::<T>()?;
         let n = u.arbitrary_len::<T>()?;
-        Ok(arb_mul_pair_fixed_size(u, l, m, n)?)
+        arb_mul_pair_fixed_size(u, l, m, n)
     }
 }
 

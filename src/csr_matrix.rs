@@ -7,11 +7,11 @@ use std::{
     fmt::Debug,
     iter::repeat_with,
     mem,
-    ops::{Add, Mul, Range},
+    ops::{Add, Mul},
     vec,
 };
 
-use crate::{dok_matrix::DokMatrix, Matrix};
+use crate::{dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix};
 
 #[cfg(test)]
 mod tests;
@@ -23,42 +23,6 @@ pub struct CsrMatrix<T> {
     vals: Vec<T>,
     cidx: Vec<usize>,
     ridx: Vec<usize>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Slice {
-    pub start: usize,
-    pub len: usize,
-}
-
-impl From<Slice> for Range<usize> {
-    fn from(s: Slice) -> Self {
-        s.start..s.start + s.len
-    }
-}
-
-fn is_sorted(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) >= max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
-fn is_increasing(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) > max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
 }
 
 impl<T: Num> CsrMatrix<T> {
@@ -140,9 +104,9 @@ impl<T: Num> CsrMatrix<T> {
         CsrMatrix {
             rows: n,
             cols: n,
-            vals: repeat_with(|| T::one()).take(n).collect(),
-            cidx: (0..n).map(|i| i).collect(),
-            ridx: (0..=n).map(|i| i).collect(),
+            vals: repeat_with(T::one).take(n).collect(),
+            cidx: (0..n).collect(),
+            ridx: (0..=n).collect(),
         }
     }
 
@@ -150,23 +114,23 @@ impl<T: Num> CsrMatrix<T> {
         assert!(i < self.rows && j < self.cols, "position not in bounds");
 
         match self.get_row_entries(i).0.binary_search(&j) {
-            Ok(k) => {
-                let l = self.ridx[i] + k;
+            Ok(pos) => {
+                let pos = self.ridx[i] + pos;
                 if t.is_zero() {
-                    self.cidx.remove(l);
-                    for m in i+1..=self.rows  {
+                    self.cidx.remove(pos);
+                    for m in i + 1..=self.rows {
                         self.ridx[m] -= 1;
                     }
-                    Some(self.vals.remove(l))
+                    Some(self.vals.remove(pos))
                 } else {
-                    Some(mem::replace(&mut self.vals[l], t))
+                    Some(mem::replace(&mut self.vals[pos], t))
                 }
             }
-            Err(k) => {
+            Err(pos) => {
                 if !t.is_zero() {
-                    let l = self.ridx[i] + k;
-                    self.vals.insert(l, t);
-                    self.cidx.insert(l, j);
+                    let pos = self.ridx[i] + pos;
+                    self.vals.insert(pos, t);
+                    self.cidx.insert(pos, j);
                     for m in i + 1..=self.rows {
                         self.ridx[m] += 1;
                     }
@@ -258,15 +222,12 @@ impl<T: Num> Add for CsrMatrix<T> {
             let (mut rcidx, mut rvals) = self.cidx[a..b]
                 .iter()
                 .copied()
-                .zip(
-                    self.vals
-                        .splice(a..b, repeat_with(|| T::zero()).take(b - a)),
-                )
+                .zip(self.vals.splice(a..b, repeat_with(T::zero).take(b - a)))
                 .merge_join_by(
                     rhs.cidx[c..d]
                         .iter()
                         .copied()
-                        .zip(rhs.vals.splice(c..d, repeat_with(|| T::zero()).take(d - c))),
+                        .zip(rhs.vals.splice(c..d, repeat_with(T::zero).take(d - c))),
                     |(c1, _), (c2, _)| c1.cmp(c2),
                 )
                 .filter_map(|eob| match eob {
@@ -300,7 +261,7 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     fn mul(self, rhs: Self) -> Self::Output {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
-        let mut rows: Vec<(Vec<usize>, Vec<T>)> = vec![];
+        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
         self.ridx
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
@@ -310,7 +271,7 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
                 for (&k, t) in self.cidx[a..b].iter().zip(self.vals[a..b].iter()) {
                     let (rcidx, rvals) = rhs.get_row_entries(k);
                     for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
-                        let entry = row.entry(j).or_insert(T::zero());
+                        let entry = row.entry(j).or_insert_with(T::zero);
                         *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
                     }
                 }
@@ -320,9 +281,9 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .collect_into_vec(&mut rows);
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
         for (rcidx, rvals) in rows {
-            ridx.push(ridx.last().unwrap() + rcidx.len());
-            vals.extend(rvals);
             cidx.extend(rcidx);
+            vals.extend(rvals);
+            ridx.push(cidx.len());
         }
         CsrMatrix {
             rows: self.rows,
@@ -342,7 +303,7 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
         for ((i, j), t) in old {
             vals.push(t);
             cidx.push(j);
-            if let None = ridx.get(i + 1) {
+            if ridx.get(i + 1).is_none() {
                 let &k = ridx.last().unwrap();
                 for _ in ridx.len()..=i + 1 {
                     ridx.push(k);

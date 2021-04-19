@@ -73,7 +73,7 @@ fn arb_invariants() {
     let mut runner = TestRunner::default();
     runner
         .run(&CsrMatrix::<i8>::arb_matrix(), |m| {
-            prop_assert!(m.invariants());
+            prop_assert!(m.invariants(), "{:?}", m);
             Ok(())
         })
         .unwrap();
@@ -85,7 +85,7 @@ fn from_arb_dok_invariants() {
     runner
         .run(&DokMatrix::<i8>::arb_matrix(), |m| {
             let m = CsrMatrix::from(m);
-            prop_assert!(m.invariants());
+            prop_assert!(m.invariants(), "{:?}", m);
             Ok(())
         })
         .unwrap();
@@ -100,7 +100,7 @@ fn add() {
             &arb_add_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
             |AddPair(m1, m2)| {
                 let m = CsrMatrix::from(m1.clone()) + CsrMatrix::from(m2.clone());
-                prop_assert!(m.invariants());
+                prop_assert!(m.invariants(), "{:?}", m);
                 prop_assert_eq!(m, CsrMatrix::from(m1 + m2));
                 Ok(())
             },
@@ -116,7 +116,7 @@ fn mul() {
             &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
             |MulPair(m1, m2)| {
                 let m = &CsrMatrix::from(m1.clone()) * &CsrMatrix::from(m2.clone());
-                prop_assert!(m.invariants());
+                prop_assert!(m.invariants(), "{:?}", m);
                 prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
                 Ok(())
             },
@@ -130,7 +130,7 @@ fn transpose() {
     runner
         .run(&DokMatrix::<i8>::arb_matrix(), |m| {
             let m1 = CsrMatrix::from(m.clone()).transpose();
-            prop_assert!(m1.invariants());
+            prop_assert!(m1.invariants(), "{:?}", m1);
             prop_assert_eq!(m1, CsrMatrix::from(m.transpose()));
             Ok(())
         })
@@ -154,7 +154,7 @@ fn set_element() {
                 let mut m1 = CsrMatrix::from(m.clone());
                 m.set_element((i, j), t.clone());
                 m1.set_element((i, j), t.clone());
-                assert!(m1.invariants());
+                assert!(m1.invariants(), "{:?}", m1);
                 assert_eq!(m1, CsrMatrix::from(m));
                 Ok(())
             },

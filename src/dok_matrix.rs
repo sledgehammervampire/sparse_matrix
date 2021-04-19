@@ -293,7 +293,7 @@ pub fn parse_matrix_market<T: FromStr + Clone + Num>(input: &str) -> IResult<&st
                 |mut entries, (r, c, t)| {
                     if !t.is_zero() {
                         // matrix market format is 1-indexed, but our matrix is 0-indexed
-                        entries.insert((r - 1, c - 1), t.clone());
+                        entries.insert((r - 1, c - 1), t);
                     }
                     entries
                 },
