@@ -1,5 +1,3 @@
-#![feature(allocator_api)]
-
 use std::{borrow::Cow, ops::Range};
 
 mod arbitrary;

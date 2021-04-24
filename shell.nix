@@ -6,5 +6,7 @@ pkgs.mkShell {
     cargo-edit
     cargo-flamegraph
     lld_11
+    coz
+    hotspot
   ];
 }

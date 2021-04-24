@@ -13,9 +13,9 @@ rayon = "1.5.0"
 nom = "6.1.2"
 anyhow = "1.0.39"
 arbitrary = "1.0.0"
-bumpalo = { version = "3.6.1", features = ["allocator_api"] }
 crossbeam = "0.8.0"
 num_cpus = "1.13.0"
+coz = "0.1.3"
 
 [dev-dependencies]
 criterion = "0.3.4"
