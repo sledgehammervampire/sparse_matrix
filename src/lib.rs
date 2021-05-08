@@ -21,11 +21,11 @@ pub trait Matrix<T: ToOwned> {
 
 // pair of matrices conformable for addition
 #[derive(Clone, Debug)]
-pub struct AddPair<M>(pub(crate) M, pub(crate) M);
+pub struct AddPair<M>(pub M, pub M);
 
 // pair of matrices conformable for multiplication
 #[derive(Clone, Debug)]
-pub struct MulPair<M>(pub(crate) M, pub(crate) M);
+pub struct MulPair<M>(pub M, pub M);
 
 fn is_sorted(s: &[usize]) -> bool {
     let mut max = None;

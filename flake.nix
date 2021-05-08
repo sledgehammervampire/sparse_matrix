@@ -61,11 +61,9 @@
             };
 
           # Configuration for the non-Rust dependencies
-          buildInputs = with pkgs; [ openssl.dev ];
-          nativeBuildInputs = with pkgs; [ rustc cargo pkgconfig nixpkgs-fmt ];
-          buildEnvVars = {
-            PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
-          };
+          buildInputs = with pkgs; [ fontconfig.dev cargo-fuzz ];
+          nativeBuildInputs = with pkgs; [ cmake pkg-config ];
+          buildEnvVars = { };
         in
         rec {
           packages.${name} = project.rootCrate.build;

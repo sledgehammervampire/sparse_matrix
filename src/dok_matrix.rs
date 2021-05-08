@@ -199,46 +199,76 @@ impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
     }
 }
 
-pub fn parse_matrix_market<T: FromStr + Clone + Num>(input: &str) -> IResult<&str, DokMatrix<T>> {
+pub enum MatrixType<I, R> {
+    Integer(DokMatrix<I>),
+    Real(DokMatrix<R>),
+}
+
+pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
+    input: &str,
+) -> IResult<&str, MatrixType<I, R>> {
     use nom::{
         branch::alt,
         bytes::complete::tag,
         character::complete::{char, digit1, line_ending, not_line_ending},
         combinator::{map, map_res, opt, recognize},
         multi::{fold_many0, many0},
+        number::complete::recognize_float,
         sequence::{delimited, pair, preceded, tuple},
     };
+    use EntryType::*;
+    use MatrixShape::*;
 
-    fn parse_num<T: FromStr>(input: &str) -> IResult<&str, T> {
-        map_res(recognize(pair(opt(char('-')), digit1)), str::parse)(input)
+    enum EntryType {
+        Real,
+        Integer,
+    }
+    enum MatrixShape {
+        General,
+        Symmetric,
     }
 
+    fn recognize_int<T: FromStr>(input: &str) -> IResult<&str, &str> {
+        recognize(pair(opt(char('-')), digit1))(input)
+    }
+    fn parse_usize(input: &str) -> IResult<&str, usize> {
+        map_res(recognize_int::<usize>, str::parse)(input)
+    }
     fn matrix_size(input: &str) -> IResult<&str, (usize, usize)> {
         map(
-            tuple((
-                parse_num::<usize>,
-                char(' '),
-                parse_num::<usize>,
-                char(' '),
-                parse_num::<usize>,
-                line_ending,
-            )),
+            tuple({
+                (
+                    parse_usize,
+                    char(' '),
+                    parse_usize,
+                    char(' '),
+                    parse_usize,
+                    line_ending,
+                )
+            }),
             |(r, _, c, _, _, _)| (r, c),
         )(input)
     }
-
-    fn matrix_entry<T: FromStr>(input: &str) -> IResult<&str, (usize, usize, T)> {
-        map(
-            tuple((
-                parse_num::<usize>,
-                char(' '),
-                parse_num::<usize>,
-                char(' '),
-                parse_num::<T>,
-                line_ending,
-            )),
-            |(r, _, c, _, e, _)| (r, c, e),
-        )(input)
+    fn general<T: Num>(
+        mut entries: BTreeMap<(usize, usize), T>,
+        (r, c, t): (usize, usize, T),
+    ) -> BTreeMap<(usize, usize), T> {
+        if !t.is_zero() {
+            // matrix market format is 1-indexed, but our matrix is 0-indexed
+            entries.insert((r - 1, c - 1), t);
+        }
+        entries
+    }
+    fn symmetric<T: Num + Clone>(
+        mut entries: BTreeMap<(usize, usize), T>,
+        (r, c, t): (usize, usize, T),
+    ) -> BTreeMap<(usize, usize), T> {
+        if !t.is_zero() {
+            // matrix market format is 1-indexed, but our matrix is 0-indexed
+            entries.insert((r - 1, c - 1), t.clone());
+            entries.insert((c - 1, r - 1), t);
+        }
+        entries
     }
 
     // parse header
@@ -247,9 +277,11 @@ pub fn parse_matrix_market<T: FromStr + Clone + Num>(input: &str) -> IResult<&st
         char(' '),
         alt((tag("integer"), tag("real"), tag("complex"), tag("pattern"))),
     )(input)?;
-    if entry_type != "integer" {
-        unimplemented!("matrix entry type {} unsupported", entry_type);
-    }
+    let entry_type = match entry_type {
+        "integer" => Integer,
+        "real" => Real,
+        _ => todo!("entry type {} unsupported", entry_type),
+    };
     let (input, shape) = delimited(
         char(' '),
         alt((
@@ -260,55 +292,123 @@ pub fn parse_matrix_market<T: FromStr + Clone + Num>(input: &str) -> IResult<&st
         )),
         line_ending,
     )(input)?;
+    let shape = match shape {
+        "general" => General,
+        "symmetric" => Symmetric,
+        _ => todo!("matrix shape {} unsupported", shape),
+    };
     // parse comments
     let (input, _) = many0(delimited(char('%'), not_line_ending, line_ending))(input)?;
     let (input, (rows, cols)) = matrix_size(input)?;
-    match shape {
-        "symmetric" => {
+
+    match (entry_type, shape) {
+        (Integer, General) => {
             let (input, entries) = fold_many0(
-                matrix_entry::<T>,
+                map(
+                    tuple({
+                        (
+                            parse_usize,
+                            char(' '),
+                            parse_usize,
+                            char(' '),
+                            map_res(recognize_int::<I>, str::parse),
+                            line_ending,
+                        )
+                    }),
+                    |(r, _, c, _, e, _)| (r, c, e),
+                ),
                 BTreeMap::new(),
-                |mut entries, (r, c, t)| {
-                    if !t.is_zero() {
-                        // matrix market format is 1-indexed, but our matrix is 0-indexed
-                        entries.insert((r - 1, c - 1), t.clone());
-                        entries.insert((c - 1, r - 1), t);
-                    }
-                    entries
-                },
+                general,
             )(input)?;
             Ok((
                 input,
-                DokMatrix {
+                MatrixType::Integer(DokMatrix {
                     rows,
                     cols,
                     entries,
-                },
+                }),
             ))
         }
-        "general" => {
+        (Integer, Symmetric) => {
             let (input, entries) = fold_many0(
-                matrix_entry::<T>,
+                map(
+                    tuple({
+                        (
+                            parse_usize,
+                            char(' '),
+                            parse_usize,
+                            char(' '),
+                            map_res(recognize_int::<I>, str::parse),
+                            line_ending,
+                        )
+                    }),
+                    |(r, _, c, _, e, _)| (r, c, e),
+                ),
                 BTreeMap::new(),
-                |mut entries, (r, c, t)| {
-                    if !t.is_zero() {
-                        // matrix market format is 1-indexed, but our matrix is 0-indexed
-                        entries.insert((r - 1, c - 1), t);
-                    }
-                    entries
-                },
+                symmetric,
             )(input)?;
             Ok((
                 input,
-                DokMatrix {
+                MatrixType::Integer(DokMatrix {
                     rows,
                     cols,
                     entries,
-                },
+                }),
             ))
         }
-        _ => {
-            unimplemented!("matrix shape {} unsupported", shape);
+        (Real, General) => {
+            let (input, entries) = fold_many0(
+                map(
+                    tuple({
+                        (
+                            parse_usize,
+                            char(' '),
+                            parse_usize,
+                            char(' '),
+                            map_res(recognize_float, str::parse),
+                            line_ending,
+                        )
+                    }),
+                    |(r, _, c, _, e, _)| (r, c, e),
+                ),
+                BTreeMap::new(),
+                general,
+            )(input)?;
+            Ok((
+                input,
+                MatrixType::Real(DokMatrix {
+                    rows,
+                    cols,
+                    entries,
+                }),
+            ))
+        }
+        (Real, Symmetric) => {
+            let (input, entries) = fold_many0(
+                map(
+                    tuple({
+                        (
+                            parse_usize,
+                            char(' '),
+                            parse_usize,
+                            char(' '),
+                            map_res(recognize_float, str::parse),
+                            line_ending,
+                        )
+                    }),
+                    |(r, _, c, _, e, _)| (r, c, e),
+                ),
+                BTreeMap::new(),
+                symmetric,
+            )(input)?;
+            Ok((
+                input,
+                MatrixType::Real(DokMatrix {
+                    rows,
+                    cols,
+                    entries,
+                }),
+            ))
         }
     }
 }
