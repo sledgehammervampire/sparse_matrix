@@ -202,6 +202,7 @@ impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
 pub enum MatrixType<I, R> {
     Integer(DokMatrix<I>),
     Real(DokMatrix<R>),
+    Complex(DokMatrix<num::complex::Complex<R>>),
 }
 
 pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
@@ -220,8 +221,9 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
     use MatrixShape::*;
 
     enum EntryType {
-        Real,
         Integer,
+        Real,
+        Complex,
     }
     enum MatrixShape {
         General,
@@ -280,6 +282,7 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
     let entry_type = match entry_type {
         "integer" => Integer,
         "real" => Real,
+        "complex" => Complex,
         _ => todo!("entry type {} unsupported", entry_type),
     };
     let (input, shape) = delimited(
@@ -404,6 +407,60 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
             Ok((
                 input,
                 MatrixType::Real(DokMatrix {
+                    rows,
+                    cols,
+                    entries,
+                }),
+            ))
+        }
+        (Complex, General) => {
+            let (input, entries) = fold_many0(
+                map(
+                    tuple((
+                        parse_usize,
+                        char(' '),
+                        parse_usize,
+                        char(' '),
+                        map_res(recognize_float, str::parse),
+                        char(' '),
+                        map_res(recognize_float, str::parse),
+                        line_ending,
+                    )),
+                    |(r, _, c, _, re, _, im, _)| (r, c, num::complex::Complex { re, im }),
+                ),
+                BTreeMap::new(),
+                general,
+            )(input)?;
+            Ok((
+                input,
+                MatrixType::Complex(DokMatrix {
+                    rows,
+                    cols,
+                    entries,
+                }),
+            ))
+        }
+        (Complex, Symmetric) => {
+            let (input, entries) = fold_many0(
+                map(
+                    tuple((
+                        parse_usize,
+                        char(' '),
+                        parse_usize,
+                        char(' '),
+                        map_res(recognize_float, str::parse),
+                        char(' '),
+                        map_res(recognize_float, str::parse),
+                        line_ending,
+                    )),
+                    |(r, _, c, _, re, _, im, _)| (r, c, num::complex::Complex { re, im }),
+                ),
+                BTreeMap::new(),
+                symmetric,
+            )(input)?;
+            Ok((
+                input,
+                MatrixType::Complex(DokMatrix {
                     rows,
                     cols,
                     entries,
