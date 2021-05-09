@@ -3,7 +3,6 @@ use num::Num;
 use rayon::{iter::ParallelIterator, prelude::*};
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
     fmt::Debug,
     iter::repeat_with,
     mem,
@@ -266,17 +265,42 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let mut row = BTreeMap::new();
-
-                for (&k, t) in self.cidx[a..b].iter().zip(self.vals[a..b].iter()) {
-                    let (rcidx, rvals) = rhs.get_row_entries(k);
-                    for (&j, t1) in rcidx.iter().zip(rvals.iter()) {
-                        let entry = row.entry(j).or_insert_with(T::zero);
-                        *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
+                let mut row = vec![];
+                for (j, _, t) in self.cidx[a..b]
+                    .iter()
+                    .zip(self.vals[a..b].iter())
+                    .map(|(&k, t)| {
+                        let (rcidx, rvals) = rhs.get_row_entries(k);
+                        rcidx
+                            .iter()
+                            .zip(rvals.iter())
+                            .map(move |(&j, t1)| (j, k, t.clone() * t1.clone()))
+                    })
+                    .kmerge_by(|(j, k, _), (j1, k1, _)| (j, k) < (j1, k1))
+                {
+                    // merge entries with identical js by summing them
+                    match row.pop() {
+                        None => {
+                            row.push((j, t));
+                        }
+                        Some((j1, t1)) => {
+                            if j1 != j {
+                                if !t1.is_zero() {
+                                    row.push((j1, t1.clone()));
+                                }
+                                row.push((j, t));
+                            } else {
+                                row.push((j, t1 + t));
+                            }
+                        }
                     }
                 }
-
-                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
+                if let Some((j, t)) = row.pop() {
+                    if !t.is_zero() {
+                        row.push((j, t));
+                    }
+                }
+                row.into_iter().unzip()
             })
             .collect_into_vec(&mut rows);
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
