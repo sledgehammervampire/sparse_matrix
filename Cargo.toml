@@ -13,7 +13,7 @@ rayon = "1.5.0"
 nom = "6.1.2"
 anyhow = "1.0.39"
 arbitrary = "1.0.0"
-arrayfire = "3.8.0"
+walkdir = "2.3.2"
 
 [dev-dependencies]
 criterion = "0.3.4"
