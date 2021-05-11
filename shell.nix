@@ -14,7 +14,7 @@ pkgs.mkShell
     gperf
     unzip
     cudatoolkit
-    linuxPackages.nvidia_x11
+    linuxPackages.nvidia_x11_legacy390
     libGLU
     libGL
     xorg.libXi
@@ -33,8 +33,8 @@ pkgs.mkShell
   RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
   shellHook = ''
     export CUDA_PATH=${pkgs.cudatoolkit}
-    # export LD_LIBRARY_PATH=${pkgs.linuxPackages.nvidia_x11}/lib:${pkgs.ncurses5}/lib
-    export EXTRA_LDFLAGS="-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib"
+    export LD_LIBRARY_PATH=${pkgs.linuxPackages.nvidia_x11_legacy390}/lib:${pkgs.ncurses5}/lib
+    export EXTRA_LDFLAGS="-L/lib -L${pkgs.linuxPackages.nvidia_x11_legacy390}/lib"
     export EXTRA_CCFLAGS="-I/usr/include"
   '';
 }
