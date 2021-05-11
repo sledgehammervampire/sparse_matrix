@@ -274,42 +274,20 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let mut row = vec![];
-                for (j, t) in self.cidx[a..b]
+                let mut row = BTreeMap::new();
+
+                self.cidx[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
-                    .map(|(&k, t)| {
+                    .for_each(|(&k, t)| {
                         let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx
-                            .iter()
-                            .zip(rvals.iter())
-                            .map(move |(&j, t1)| (j, t.clone() * t1.clone()))
-                    })
-                    .kmerge_by(|j, j1| j.0 < j1.0)
-                {
-                    // merge entries with identical js by summing them
-                    match row.pop() {
-                        None => {
-                            row.push((j, t));
-                        }
-                        Some((j1, t1)) => {
-                            if j1 != j {
-                                if !t1.is_zero() {
-                                    row.push((j1, t1));
-                                }
-                                row.push((j, t));
-                            } else {
-                                row.push((j, t1 + t));
-                            }
-                        }
-                    }
-                }
-                if let Some((j, t)) = row.pop() {
-                    if !t.is_zero() {
-                        row.push((j, t));
-                    }
-                }
-                row.into_iter().unzip()
+                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
+                            let entry = row.entry(j).or_insert_with(T::zero);
+                            *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
+                        });
+                    });
+
+                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
             })
             .collect_into_vec(&mut rows);
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
