@@ -1,7 +1,7 @@
 { pkgs ? import <nixpkgs> { } }:
 pkgs.mkShell
 {
-  buildInputs = (with pkgs; [ cargo-edit fontconfig.dev cargo-fuzz arrayfire hyperfine lld ]) ++ (with pkgs; [
+  buildInputs = (with pkgs; [ cargo-edit fontconfig.dev cargo-fuzz arrayfire llvmPackages_latest.lld cargo-binutils ]) ++ (with pkgs; [
     git
     gitRepo
     gnupg
