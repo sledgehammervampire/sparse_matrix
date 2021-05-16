@@ -1,6 +1,7 @@
 use itertools::{iproduct, Itertools};
 use num::Num;
 use rayon::{iter::ParallelIterator, prelude::*};
+use rustc_hash::FxHashMap;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
@@ -274,7 +275,7 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let mut row = BTreeMap::new();
+                let mut row = FxHashMap::default();
 
                 self.cidx[a..b]
                     .iter()
@@ -287,7 +288,12 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
                         });
                     });
 
-                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
+                let mut row = row
+                    .into_iter()
+                    .filter(|(_, t)| !t.is_zero())
+                    .collect::<Vec<_>>();
+                row.par_sort_by_key(|(c, _)| *c);
+                row.into_iter().unzip()
             })
             .collect_into_vec(&mut rows);
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
