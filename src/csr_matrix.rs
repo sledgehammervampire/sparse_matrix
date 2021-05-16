@@ -1,15 +1,7 @@
 use itertools::{iproduct, Itertools};
-use num::Num;
+use num::{traits::NumAssign, Num};
 use rayon::{iter::ParallelIterator, prelude::*};
-use std::{
-    borrow::Cow,
-    collections::BTreeMap,
-    fmt::Debug,
-    iter::repeat_with,
-    mem,
-    ops::{Add, Mul},
-    vec,
-};
+use std::{borrow::Cow, collections::{BTreeMap, BTreeSet}, fmt::Debug, iter::repeat_with, mem, ops::{Add, Mul}, vec};
 
 use crate::{dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix};
 
@@ -263,7 +255,7 @@ impl<T: Num> Add for CsrMatrix<T> {
     }
 }
 
-impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
+impl<T: NumAssign + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -274,7 +266,8 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let mut row = BTreeMap::new();
+                let mut row = vec![T::zero(); rhs.cols];
+                let mut idx = BTreeSet::new();
 
                 self.cidx[a..b]
                     .iter()
@@ -282,12 +275,23 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
                     .for_each(|(&k, t)| {
                         let (rcidx, rvals) = rhs.get_row_entries(k);
                         rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
-                            let entry = row.entry(j).or_insert_with(T::zero);
-                            *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
+                            let entry = &mut row[j];
+                            if entry.is_zero() {
+                                idx.insert(j);
+                            }
+                            *entry += t.clone() * t1.clone();
                         });
                     });
 
-                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
+                idx.into_iter()
+                    .filter_map(|i| {
+                        if row[i].is_zero() {
+                            None
+                        } else {
+                            Some((i, row[i].clone()))
+                        }
+                    })
+                    .unzip()
             })
             .collect_into_vec(&mut rows);
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
