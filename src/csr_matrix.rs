@@ -1,7 +1,7 @@
-use ahash::AHashMap;
 use itertools::{iproduct, Itertools};
 use num::Num;
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
@@ -275,7 +275,7 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let mut row = AHashMap::new();
+                let mut row = FxHashMap::default();
 
                 self.cidx[a..b]
                     .iter()
