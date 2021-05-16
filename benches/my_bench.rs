@@ -13,7 +13,7 @@ pub fn bench_mul(c: &mut Criterion) {
     fn foo<T: Clone + Num + Send + Sync>(c: &mut Criterion, f: &OsStr, m1: DokMatrix<T>) {
         let m1 = CsrMatrix::from(m1);
         if let Some(&len) = m1.row_nnz_freq().keys().last() {
-            if len > 3000 {
+            if len > 10000 {
                 return;
             }
         }
