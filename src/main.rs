@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
 fn foo<T: Num + Clone + Send + Sync + Debug>(m1: DokMatrix<T>, f: &OsStr) {
     let m1 = CsrMatrix::from(m1);
     if let Some(&len) = m1.row_nnz_freq().keys().last() {
-        if len > 10000 {
+        if len > 15000 {
             return;
         }
     }

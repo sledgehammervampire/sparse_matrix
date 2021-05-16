@@ -3,6 +3,17 @@
 version = 3
 
 [[package]]
+name = "ahash"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f200cbb1e856866d9eade941cf3aa0c5d7dd36f74311c4273b494f4ef036957"
+dependencies = [
+ "getrandom",
+ "once_cell",
+ "version_check",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13,6 +24,22 @@ name = "arbitrary"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "698b65a961a9d730fb45b6b0327e20207810c9f61ee421b082b27ba003f49e2b"
+
+[[package]]
+name = "arrayfire"
+version = "3.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c02d832c30a1d99b71e4a6dcd5d888155ce030dd8d9b501357e60b87a60d5d3b"
+dependencies = [
+ "half",
+ "lazy_static",
+ "libc",
+ "num 0.2.1",
+ "rustc_version",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
 
 [[package]]
 name = "arrayvec"
@@ -224,6 +251,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cuda-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b34be17513126fc87acdbb851bc430fdcdbfcd2945eb4e38171d4e1601cae6c3"
+
+[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -364,15 +397,40 @@ dependencies = [
 
 [[package]]
 name = "num"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8536030f9fea7127f841b45bb6243b27255787fb4eb83958aa1ef9d2fdc0c36"
+dependencies = [
+ "num-bigint 0.2.6",
+ "num-complex 0.2.4",
+ "num-integer",
+ "num-iter",
+ "num-rational 0.2.4",
+ "num-traits",
+]
+
+[[package]]
+name = "num"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43db66d1170d347f9a065114077f7dccb00c1b9478c89384490a3425279a4606"
 dependencies = [
- "num-bigint",
- "num-complex",
+ "num-bigint 0.4.0",
+ "num-complex 0.4.0",
  "num-integer",
  "num-iter",
- "num-rational",
+ "num-rational 0.4.0",
+ "num-traits",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "090c7f9998ee0ff65aa5b723e4009f7b217707f1fb5ea551329cc4d6231fb304"
+dependencies = [
+ "autocfg",
+ "num-integer",
  "num-traits",
 ]
 
@@ -384,6 +442,16 @@ checksum = "4e0d047c1062aa51e256408c560894e5251f08925980e53cf1aa5bd00eec6512"
 dependencies = [
  "autocfg",
  "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6b19411a9719e753aff12e5187b74d60d3dc449ec3f4dc21e3989c3f554bc95"
+dependencies = [
+ "autocfg",
  "num-traits",
 ]
 
@@ -419,12 +487,24 @@ dependencies = [
 
 [[package]]
 name = "num-rational"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c000134b5dbf44adc5cb772486d335293351644b801551abe8f75c84cfa4aef"
+dependencies = [
+ "autocfg",
+ "num-bigint 0.2.6",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d41702bd167c2df5520b384281bc111a4b5efcf7fbc4c9c222c815b07e0a6a6a"
 dependencies = [
  "autocfg",
- "num-bigint",
+ "num-bigint 0.4.0",
  "num-integer",
  "num-traits",
 ]
@@ -447,6 +527,12 @@ dependencies = [
  "hermit-abi",
  "libc",
 ]
+
+[[package]]
+name = "once_cell"
+version = "1.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af8b08b04175473088b46763e51ee54da5f9a164bc162f615b91bc179dbf15a3"
 
 [[package]]
 name = "oorandom"
@@ -661,6 +747,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustacuda"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0791040f6a5783dc54dda2b37a7ba61c8e10b35078d8e2e21154c2039f7900e"
+dependencies = [
+ "bitflags",
+ "cuda-sys",
+ "rustacuda_core",
+ "rustacuda_derive",
+]
+
+[[package]]
+name = "rustacuda_core"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3858b08976dc2f860c5efbbb48cdcb0d4fafca92a6ac0898465af16c0dbe848"
+
+[[package]]
+name = "rustacuda_derive"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43ce8670a1a1d0fc2514a3b846dacdb65646f9bd494b6674cfacbb4ce430bd7e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
 name = "rustc_version"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -759,14 +880,19 @@ dependencies = [
 name = "spam"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "arbitrary",
+ "arrayfire",
+ "bumpalo",
  "criterion",
  "itertools 0.10.0",
  "nom",
- "num",
+ "num 0.4.0",
  "proptest",
  "rayon",
+ "rustacuda",
+ "rustc-hash",
  "walkdir",
 ]
 
