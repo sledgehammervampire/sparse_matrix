@@ -19,6 +19,7 @@ rustacuda = "0.1.2"
 bumpalo = { version = "3.6.1", features = ["allocator_api"] }
 rustc-hash = "1.1.0"
 ahash = "0.7.2"
+indexmap = { version = "1.6.2", features = ["rayon"] }
 
 [dev-dependencies]
 criterion = "0.3.4"
@@ -29,4 +30,7 @@ name = "my_bench"
 harness = false
 
 [profile.release]
+debug = true
+
+[profile.bench]
 debug = true

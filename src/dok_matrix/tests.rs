@@ -1,9 +1,10 @@
-use std::{fs::read_to_string, num::Wrapping};
+use std::{fs, num::Wrapping};
 
 use num::Num;
 use proptest::{prop_assert, prop_assert_eq, strategy::Strategy, test_runner::TestRunner};
+use walkdir::WalkDir;
 
-use super::{parse_matrix_market, DokMatrix};
+use super::{parse_matrix_market, DokMatrix, MatrixType};
 use crate::{
     csr_matrix::CsrMatrix,
     proptest::{arb_add_pair, arb_matrix, arb_mul_pair},
@@ -68,13 +69,32 @@ fn from_arb_csr_invariants() {
 
 #[ignore = "expensive, files don't change"]
 #[test]
-fn from_matrix_market() {
-    for f in &["sc2010", "tube2", "big", "gr_30_30", "bcsstm01"] {
-        let m = parse_matrix_market::<i32>(&read_to_string(format!("matrices/{}.mtx", f)).unwrap())
-            .unwrap()
-            .1;
-        assert!(m.invariants());
+fn from_matrix_market() -> anyhow::Result<()> {
+    for entry in WalkDir::new("matrices") {
+        let entry = entry?;
+        if let Some(ext) = entry.path().extension() {
+            if ext == "mtx" {
+                match parse_matrix_market::<i64, f64>(&fs::read_to_string(entry.path()).unwrap())
+                    .unwrap()
+                    .1
+                {
+                    MatrixType::Integer(m) => {
+                        let m = CsrMatrix::from(m);
+                        assert!(m.invariants());
+                    }
+                    MatrixType::Real(m) => {
+                        let m = CsrMatrix::from(m);
+                        assert!(m.invariants());
+                    }
+                    MatrixType::Complex(m) => {
+                        let m = CsrMatrix::from(m);
+                        assert!(m.invariants());
+                    }
+                };
+            }
+        }
     }
+    Ok(())
 }
 
 // inductive cases

@@ -10,6 +10,8 @@ pkgs.mkShell
     cargo-binutils
     cargo-flamegraph
     hotspot
+    cargo-outdated
+    linuxPackages.perf
   ]) ++ (with pkgs; [
     git
     gitRepo
