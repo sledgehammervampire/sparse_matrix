@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, fs::read_to_string};
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use num::Num;
+use num::traits::NumAssign;
 use spam::{
     csr_matrix::CsrMatrix,
     dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
@@ -10,7 +10,7 @@ use spam::{
 use walkdir::WalkDir;
 
 pub fn bench_mul(c: &mut Criterion) {
-    fn foo<T: Clone + Num + Send + Sync>(c: &mut Criterion, f: &OsStr, m1: DokMatrix<T>) {
+    fn foo<T: Clone + NumAssign + Send + Sync>(c: &mut Criterion, f: &OsStr, m1: DokMatrix<T>) {
         let m1 = CsrMatrix::from(m1);
         if let Some(&len) = m1.row_nnz_freq().keys().last() {
             if len > 10000 {

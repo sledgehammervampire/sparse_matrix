@@ -1,11 +1,12 @@
 use itertools::{iproduct, Itertools};
-use num::Num;
+use num::{traits::NumAssign, Num};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHasher;
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
+    hash::BuildHasherDefault,
     iter::repeat_with,
     mem,
     ops::{Add, Mul},
@@ -264,7 +265,7 @@ impl<T: Num> Add for CsrMatrix<T> {
     }
 }
 
-impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
+impl<T: NumAssign + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -275,7 +276,14 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
             .par_iter()
             .zip(self.ridx.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let mut row = FxHashMap::default();
+                let capacity = self.cidx[a..b]
+                    .iter()
+                    .map(|&k| rhs.get_row_entries(k).0.len())
+                    .sum();
+                let mut row = HashMap::with_capacity_and_hasher(
+                    capacity,
+                    BuildHasherDefault::<FxHasher>::default(),
+                );
 
                 self.cidx[a..b]
                     .iter()
@@ -284,7 +292,7 @@ impl<T: Num + Clone + Send + Sync> Mul for &CsrMatrix<T> {
                         let (rcidx, rvals) = rhs.get_row_entries(k);
                         rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
                             let entry = row.entry(j).or_insert_with(T::zero);
-                            *entry = mem::replace(entry, T::zero()) + t.clone() * t1.clone();
+                            *entry += t.clone() * t1.clone();
                         });
                     });
 

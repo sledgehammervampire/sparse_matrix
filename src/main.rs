@@ -1,4 +1,4 @@
-use num::Num;
+use num::traits::NumAssign;
 use spam::{
     csr_matrix::CsrMatrix,
     dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn foo<T: Num + Clone + Send + Sync + Debug>(m1: DokMatrix<T>, f: &OsStr) {
+fn foo<T: NumAssign + Clone + Send + Sync + Debug>(m1: DokMatrix<T>, f: &OsStr) {
     let m1 = CsrMatrix::from(m1);
     if let Some(&len) = m1.row_nnz_freq().keys().last() {
         if len > 15000 {
