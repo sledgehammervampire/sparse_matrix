@@ -16,35 +16,6 @@ use crate::{
 
 const MAX_SIZE: usize = 10;
 
-impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T> {
-    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl Strategy<Value = CsrMatrix<T>> {
-        repeat_with(|| subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
-            .take(rows)
-            .collect::<Vec<_>>()
-            .prop_flat_map(move |cidx| {
-                let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
-                for mut rcidx in cidx {
-                    ridx.push(ridx.last().unwrap() + rcidx.len());
-                    cidx_flattened.append(&mut rcidx);
-                }
-                repeat_with(|| T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()))
-                    .take(cidx_flattened.len())
-                    .collect::<Vec<_>>()
-                    .prop_map(move |vals| CsrMatrix {
-                        rows,
-                        cols,
-                        vals,
-                        cidx: cidx_flattened.clone(),
-                        ridx: ridx.clone(),
-                    })
-            })
-    }
-
-    pub fn arb_matrix() -> impl Strategy<Value = Self> {
-        crate::proptest::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
-    }
-}
-
 // base cases
 #[test]
 fn new_invariants() {
@@ -209,4 +180,33 @@ fn convert() {
             Ok(())
         })
         .unwrap();
+}
+
+impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T> {
+    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl Strategy<Value = CsrMatrix<T>> {
+        repeat_with(|| subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
+            .take(rows)
+            .collect::<Vec<_>>()
+            .prop_flat_map(move |cidx| {
+                let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
+                for mut rcidx in cidx {
+                    ridx.push(ridx.last().unwrap() + rcidx.len());
+                    cidx_flattened.append(&mut rcidx);
+                }
+                repeat_with(|| T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()))
+                    .take(cidx_flattened.len())
+                    .collect::<Vec<_>>()
+                    .prop_map(move |vals| CsrMatrix {
+                        rows,
+                        cols,
+                        vals,
+                        cidx: cidx_flattened.clone(),
+                        ridx: ridx.clone(),
+                    })
+            })
+    }
+
+    pub fn arb_matrix() -> impl Strategy<Value = Self> {
+        crate::proptest::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
+    }
 }

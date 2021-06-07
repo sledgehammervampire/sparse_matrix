@@ -9,17 +9,16 @@ edition = "2018"
 [dependencies]
 num = "0.4.0"
 itertools = "0.10.0"
-rayon = "1.5.0"
+rayon = "1.5.1"
 nom = "6.1.2"
 anyhow = "1.0.40"
-arbitrary = "1.0.0"
+arbitrary = "1.0.1"
 walkdir = "2.3.2"
 arrayfire = "3.8.0"
 rustacuda = "0.1.2"
-bumpalo = { version = "3.6.1", features = ["allocator_api"] }
 rustc-hash = "1.1.0"
-ahash = "0.7.2"
 indexmap = { version = "1.6.2", features = ["rayon"] }
+num_cpus = "1.13.0"
 
 [dev-dependencies]
 criterion = "0.3.4"

@@ -13,3 +13,5 @@ Cargo.lock
 /matrices
 perf.data*
 *.svg
+/.direnv
+/.vscode
