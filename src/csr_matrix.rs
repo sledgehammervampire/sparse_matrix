@@ -10,7 +10,6 @@ use std::{
     iter::repeat_with,
     mem,
     ops::{Add, Mul},
-    vec,
 };
 
 use crate::{dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix};
@@ -211,6 +210,136 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
     }
 }
 
+impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
+    pub fn mul_hash(&self, rhs: &Self) -> Self {
+        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
+
+        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
+        self.ridx
+            .par_iter()
+            .zip(self.ridx.par_iter().skip(1))
+            .map(|(&a, &b)| {
+                let capacity = self.cidx[a..b]
+                    .iter()
+                    .map(|&k| rhs.get_row_entries(k).0.len())
+                    .sum();
+                let mut row = HashMap::with_capacity_and_hasher(
+                    capacity,
+                    BuildHasherDefault::<FxHasher>::default(),
+                );
+
+                self.cidx[a..b]
+                    .iter()
+                    .zip(self.vals[a..b].iter())
+                    .for_each(|(&k, t)| {
+                        let (rcidx, rvals) = rhs.get_row_entries(k);
+                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
+                            let entry = row.entry(j).or_insert_with(T::zero);
+                            *entry += t.clone() * t1.clone();
+                        });
+                    });
+
+                let mut row = row
+                    .into_iter()
+                    .filter(|(_, t)| !t.is_zero())
+                    .collect::<Vec<_>>();
+                row.par_sort_by_key(|(c, _)| *c);
+                row.into_iter().unzip()
+            })
+            .collect_into_vec(&mut rows);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+        for (rcidx, rvals) in rows {
+            cidx.extend(rcidx);
+            vals.extend(rvals);
+            ridx.push(cidx.len());
+        }
+        CsrMatrix {
+            rows: self.rows,
+            cols: rhs.cols,
+            vals,
+            cidx,
+            ridx,
+        }
+    }
+
+    pub fn mul_btree(&self, rhs: &Self) -> Self {
+        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
+
+        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
+        self.ridx
+            .par_iter()
+            .zip(self.ridx.par_iter().skip(1))
+            .map(|(&a, &b)| {
+                let mut row = BTreeMap::new();
+
+                self.cidx[a..b]
+                    .iter()
+                    .zip(self.vals[a..b].iter())
+                    .for_each(|(&k, t)| {
+                        let (rcidx, rvals) = rhs.get_row_entries(k);
+                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
+                            let entry = row.entry(j).or_insert_with(T::zero);
+                            *entry += t.clone() * t1.clone();
+                        });
+                    });
+
+                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
+            })
+            .collect_into_vec(&mut rows);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+        for (rcidx, rvals) in rows {
+            cidx.extend(rcidx);
+            vals.extend(rvals);
+            ridx.push(cidx.len());
+        }
+        CsrMatrix {
+            rows: self.rows,
+            cols: rhs.cols,
+            vals,
+            cidx,
+            ridx,
+        }
+    }
+    pub fn mul_hash1(&self, rhs: &Self) -> Self {
+        let offset = self.rows_to_threads(rhs);
+        todo!()
+    }
+
+    fn rows_to_threads(&self, rhs: &Self) -> Vec<usize> {
+        let flop: Vec<usize> = self
+            .ridx
+            .par_iter()
+            .zip(self.ridx.par_iter().skip(1))
+            .map(|(&a, &b)| {
+                self.cidx[a..b]
+                    .iter()
+                    .map(|&k| rhs.get_row_entries(k).0.len())
+                    .sum()
+            })
+            .collect();
+        // TODO: make prefix sum parallel
+        let flop_ps: Vec<_> = flop
+            .into_iter()
+            .scan(0, |sum, x| {
+                *sum += x;
+                Some(*sum)
+            })
+            .collect();
+        let sum_flop = flop_ps.last().copied().unwrap();
+        // TODO: not sure what the equivalent of omp_get_max_threads is
+        let tnum = num_cpus::get();
+        let ave_flop = sum_flop / tnum;
+        let mut v = vec![0];
+        v.par_extend(
+            (1..tnum)
+                .into_par_iter()
+                .map(|tid| flop_ps.partition_point(|&x| x >= ave_flop * tid)),
+        );
+        v.push(self.rows);
+        v
+    }
+}
+
 impl<T: Num> Add for CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
@@ -269,54 +398,7 @@ impl<T: NumAssign + Clone + Send + Sync> Mul for &CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
-
-        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.ridx
-            .par_iter()
-            .zip(self.ridx.par_iter().skip(1))
-            .map(|(&a, &b)| {
-                let capacity = self.cidx[a..b]
-                    .iter()
-                    .map(|&k| rhs.get_row_entries(k).0.len())
-                    .sum();
-                let mut row = HashMap::with_capacity_and_hasher(
-                    capacity,
-                    BuildHasherDefault::<FxHasher>::default(),
-                );
-
-                self.cidx[a..b]
-                    .iter()
-                    .zip(self.vals[a..b].iter())
-                    .for_each(|(&k, t)| {
-                        let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
-                            let entry = row.entry(j).or_insert_with(T::zero);
-                            *entry += t.clone() * t1.clone();
-                        });
-                    });
-
-                let mut row = row
-                    .into_iter()
-                    .filter(|(_, t)| !t.is_zero())
-                    .collect::<Vec<_>>();
-                row.par_sort_by_key(|(c, _)| *c);
-                row.into_iter().unzip()
-            })
-            .collect_into_vec(&mut rows);
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
-        for (rcidx, rvals) in rows {
-            cidx.extend(rcidx);
-            vals.extend(rvals);
-            ridx.push(cidx.len());
-        }
-        CsrMatrix {
-            rows: self.rows,
-            cols: rhs.cols,
-            vals,
-            cidx,
-            ridx,
-        }
+        self.mul_hash(rhs)
     }
 }
 
