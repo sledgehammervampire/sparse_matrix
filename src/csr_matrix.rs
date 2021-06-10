@@ -300,6 +300,55 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
             ridx,
         }
     }
+
+    pub fn mul_heap(&self, rhs: &Self) -> Self {
+        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
+
+        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
+        self.ridx
+            .par_iter()
+            .zip(self.ridx.par_iter().skip(1))
+            .map(|(&a, &b)| {
+                self.cidx[a..b]
+                    .iter()
+                    .zip(self.vals[a..b].iter())
+                    .map(|(&k, t)| {
+                        let (rcidx, rvals) = rhs.get_row_entries(k);
+                        rcidx
+                            .iter()
+                            .copied()
+                            .zip(rvals.iter().map(move |t1| t.clone() * t1.clone()))
+                    })
+                    .kmerge_by(|e1, e2| e1.0 < e2.0)
+                    .fold((vec![], vec![]), |(mut rcidx, mut rvals), (c, t)| {
+                        match (rcidx.last(), rvals.last_mut()) {
+                            (Some(&c1), Some(t1)) if c == c1 => {
+                                *t1 += t;
+                            }
+                            _ => {
+                                rcidx.push(c);
+                                rvals.push(t);
+                            }
+                        }
+                        (rcidx, rvals)
+                    })
+            })
+            .collect_into_vec(&mut rows);
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+        for (rcidx, rvals) in rows {
+            cidx.extend(rcidx);
+            vals.extend(rvals);
+            ridx.push(cidx.len());
+        }
+        CsrMatrix {
+            rows: self.rows,
+            cols: rhs.cols,
+            vals,
+            cidx,
+            ridx,
+        }
+    }
+
     pub fn mul_hash1(&self, rhs: &Self) -> Self {
         let offset = self.rows_to_threads(rhs);
         todo!()

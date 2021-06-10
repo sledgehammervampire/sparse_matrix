@@ -25,7 +25,15 @@ criterion = "0.3.4"
 proptest = "1.0.0"
 
 [[bench]]
-name = "my_bench"
+name = "bench_mul_hash"
+harness = false
+
+[[bench]]
+name = "bench_mul_heap"
+harness = false
+
+[[bench]]
+name = "bench_mul_btree"
 harness = false
 
 [profile.release]

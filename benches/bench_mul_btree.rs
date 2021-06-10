@@ -1,8 +1,6 @@
 use std::{ffi::OsStr, fs::read_to_string};
 
-use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
-};
+use criterion::{criterion_group, criterion_main, Criterion};
 use num::traits::NumAssign;
 use spam::{
     csr_matrix::CsrMatrix,
@@ -11,12 +9,8 @@ use spam::{
 };
 use walkdir::WalkDir;
 
-pub fn bench_mul(c: &mut Criterion) {
-    fn foo<T: Clone + NumAssign + Send + Sync>(
-        group: &mut BenchmarkGroup<WallTime>,
-        f: &OsStr,
-        m1: DokMatrix<T>,
-    ) {
+pub fn bench_mul_btree(c: &mut Criterion) {
+    fn foo<T: Clone + NumAssign + Send + Sync>(c: &mut Criterion, f: &OsStr, m1: DokMatrix<T>) {
         let m1 = CsrMatrix::from(m1);
         if let Some(&len) = m1.row_nnz_freq().keys().last() {
             if len > 10000 {
@@ -24,17 +18,7 @@ pub fn bench_mul(c: &mut Criterion) {
             }
         }
         let m2 = m1.clone();
-        group.bench_function(
-            &format!(
-                "bench mul_hash {:?} ({}x{}, {} nonzero entries)",
-                f,
-                m1.rows(),
-                m1.cols(),
-                m1.nnz()
-            ),
-            |b| b.iter(|| m1.mul_hash(&m2)),
-        );
-        group.bench_function(
+        c.bench_function(
             &format!(
                 "bench mul_btree {:?} ({}x{}, {} nonzero entries)",
                 f,
@@ -46,7 +30,6 @@ pub fn bench_mul(c: &mut Criterion) {
         );
     }
 
-    let mut group = c.benchmark_group("My Group");
     for entry in WalkDir::new("matrices") {
         let entry = entry.unwrap();
         if let Some(ext) = entry.path().extension() {
@@ -57,13 +40,13 @@ pub fn bench_mul(c: &mut Criterion) {
                     .1
                 {
                     MatrixType::Integer(m1) => {
-                        foo(&mut group, f, m1);
+                        foo(c, f, m1);
                     }
                     MatrixType::Real(m1) => {
-                        foo(&mut group, f, m1);
+                        foo(c, f, m1);
                     }
                     MatrixType::Complex(m1) => {
-                        foo(&mut group, f, m1);
+                        foo(c, f, m1);
                     }
                 }
             }
@@ -71,5 +54,5 @@ pub fn bench_mul(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_mul);
+criterion_group!(benches, bench_mul_btree);
 criterion_main!(benches);

@@ -96,6 +96,54 @@ fn mul() {
 }
 
 #[test]
+fn mul_hash() {
+    let mut runner = TestRunner::default();
+    runner
+        .run(
+            &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+            |MulPair(m1, m2)| {
+                let m = CsrMatrix::from(m1.clone()).mul_hash(&CsrMatrix::from(m2.clone()));
+                prop_assert!(m.invariants(), "{:?}", m);
+                prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                Ok(())
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn mul_btree() {
+    let mut runner = TestRunner::default();
+    runner
+        .run(
+            &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+            |MulPair(m1, m2)| {
+                let m = CsrMatrix::from(m1.clone()).mul_btree(&CsrMatrix::from(m2.clone()));
+                prop_assert!(m.invariants(), "{:?}", m);
+                prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                Ok(())
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn mul_heap() {
+    let mut runner = TestRunner::default();
+    runner
+        .run(
+            &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+            |MulPair(m1, m2)| {
+                let m = CsrMatrix::from(m1.clone()).mul_hash(&CsrMatrix::from(m2.clone()));
+                prop_assert!(m.invariants(), "{:?}", m);
+                prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                Ok(())
+            },
+        )
+        .unwrap();
+}
+
+#[test]
 fn transpose() {
     let mut runner = TestRunner::default();
     runner
