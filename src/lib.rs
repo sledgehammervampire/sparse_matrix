@@ -62,3 +62,61 @@ impl From<Slice> for Range<usize> {
         s.start..s.start + s.len
     }
 }
+
+#[macro_export]
+macro_rules! make_bench_mul {
+    ($bench_name:ident, $func_name:ident) => {
+        pub fn $bench_name(c: &mut criterion::Criterion) {
+            use criterion::Criterion;
+            use num::traits::NumAssign;
+            use spam::{
+                csr_matrix::CsrMatrix,
+                dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
+                Matrix,
+            };
+            use std::{ffi::OsStr, fs};
+            use walkdir::WalkDir;
+
+            fn inner<T: Clone + NumAssign + Send + Sync>(
+                c: &mut Criterion,
+                f: &OsStr,
+                m: DokMatrix<T>,
+            ) {
+                let m = CsrMatrix::from(m);
+                c.bench_function(
+                    &format!(
+                        "bench {:?} {:?} ({}x{}, {} nonzero entries)",
+                        stringify!($func_name),
+                        f,
+                        m.rows(),
+                        m.cols(),
+                        m.nnz()
+                    ),
+                    |b| b.iter(|| m.$func_name(&m)),
+                );
+            }
+
+            for entry in WalkDir::new("matrices")
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().extension() == Some("mtx".as_ref()))
+            {
+                let f = entry.path().file_name().unwrap();
+                match parse_matrix_market::<i64, f64>(&fs::read_to_string(entry.path()).unwrap())
+                    .unwrap()
+                    .1
+                {
+                    MatrixType::Integer(m) => {
+                        inner(c, f, m);
+                    }
+                    MatrixType::Real(m) => {
+                        inner(c, f, m);
+                    }
+                    MatrixType::Complex(m) => {
+                        inner(c, f, m);
+                    }
+                }
+            }
+        }
+    };
+}

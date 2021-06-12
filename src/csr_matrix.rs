@@ -211,6 +211,26 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
 }
 
 impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
+    pub fn mul_dense(&self, rhs: &Self) -> Self {
+        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
+
+        let mut m: CsrMatrix<T> = CsrMatrix::new(self.rows, rhs.cols);
+
+        for i in 0..self.rows {
+            let (lo, hi) = (self.ridx[i], self.ridx[i + 1]);
+            for j in lo..hi {
+                let (rcidx, rvals) = rhs.get_row_entries(self.cidx[j]);
+                for (&k, t1) in rcidx.iter().zip(rvals.iter()) {
+                    let mut t = m.get_element((i, k)).into_owned();
+                    t += self.vals[j].clone() * t1.clone();
+                    m.set_element((i, k), t);
+                }
+            }
+        }
+
+        m
+    }
+
     pub fn mul_hash(&self, rhs: &Self) -> Self {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
@@ -231,12 +251,15 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
                 self.cidx[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
-                    .for_each(|(&k, t)| {
+                    .flat_map(|(&k, t)| {
                         let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
-                            let entry = row.entry(j).or_insert_with(T::zero);
-                            *entry += t.clone() * t1.clone();
-                        });
+                        rcidx
+                            .iter()
+                            .zip(rvals.iter().map(move |t1| t.clone() * t1.clone()))
+                    })
+                    .for_each(|(&j, t)| {
+                        let entry = row.entry(j).or_insert_with(T::zero);
+                        *entry += t;
                     });
 
                 let mut row = row
@@ -350,7 +373,7 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
     }
 
     pub fn mul_hash1(&self, rhs: &Self) -> Self {
-        let offset = self.rows_to_threads(rhs);
+        let _offset = self.rows_to_threads(rhs);
         todo!()
     }
 

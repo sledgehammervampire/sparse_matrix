@@ -36,6 +36,10 @@ harness = false
 name = "bench_mul_btree"
 harness = false
 
+[[bench]]
+name = "bench_mul_dense"
+harness = false
+
 [profile.release]
 debug = true
 
