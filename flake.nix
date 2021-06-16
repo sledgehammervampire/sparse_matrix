@@ -17,15 +17,11 @@
                 buildInputs = (
                   with pkgs; [
                     cargo-edit
-                    fontconfig.dev
                     cargo-fuzz
-                    arrayfire
                     llvmPackages_latest.lld
                     cargo-binutils
                     cargo-flamegraph
                     hotspot
-                    linuxPackages.perf
-                    rr
                     cargo-criterion
                   ]
                 );

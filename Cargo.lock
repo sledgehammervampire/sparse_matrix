@@ -795,7 +795,6 @@ dependencies = [
  "rayon",
  "rayon-core",
  "rustc-hash",
- "serde_json",
  "walkdir",
 ]
 
