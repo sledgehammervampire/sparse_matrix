@@ -1,3 +1,4 @@
+#![feature(is_sorted)]
 use std::{borrow::Cow, ops::Range};
 
 mod arbitrary;
@@ -26,18 +27,6 @@ pub struct AddPair<M>(pub M, pub M);
 // pair of matrices conformable for multiplication
 #[derive(Clone, Debug)]
 pub struct MulPair<M>(pub M, pub M);
-
-fn is_sorted(s: &[usize]) -> bool {
-    let mut max = None;
-    for i in s {
-        if Some(i) >= max {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
-}
 
 fn is_increasing(s: &[usize]) -> bool {
     let mut max = None;

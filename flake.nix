@@ -25,6 +25,8 @@
                     cargo-flamegraph
                     hotspot
                     linuxPackages.perf
+                    rr
+                    cargo-criterion
                   ]
                 );
               };
