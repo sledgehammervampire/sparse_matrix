@@ -49,3 +49,10 @@ name = "mul"
 path = "fuzz_targets/mul.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "mkl_roundtrip"
+path = "fuzz_targets/mkl_roundtrip.rs"
+test = false
+doc = false
+

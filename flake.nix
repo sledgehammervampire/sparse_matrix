@@ -8,23 +8,28 @@
   outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (
     system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
       in
         {
           devShell =
-            pkgs.mkShell
+            with pkgs; mkShell
               {
-                buildInputs = (
-                  with pkgs; [
+                buildInputs =
+                  [
                     cargo-edit
                     cargo-fuzz
-                    llvmPackages_latest.lld
                     cargo-binutils
                     cargo-flamegraph
                     hotspot
                     cargo-criterion
-                  ]
-                );
+                    openssl
+                    pkg-config
+                    mkl
+                    coz
+                    rust-bindgen
+                  ] ++ (with llvmPackages_latest; [ lld clang-unwrapped.lib libllvm ]);
+                MKLROOT = "${mkl}";
+                LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
               };
         }
   );

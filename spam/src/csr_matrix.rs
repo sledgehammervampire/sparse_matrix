@@ -12,32 +12,31 @@ use std::{
     ops::{Add, Mul},
 };
 
-use crate::{dok_matrix::DokMatrix, is_increasing, Matrix};
+use crate::{dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix, MatrixError};
 
-#[cfg(test)]
-mod tests;
+pub mod ffi;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T> {
     rows: usize,
     cols: usize,
     vals: Vec<T>,
-    cidx: Vec<usize>,
-    ridx: Vec<usize>,
+    indices: Vec<usize>,
+    offsets: Vec<usize>,
 }
 
 impl<T: Num> CsrMatrix<T> {
     pub fn row_nnz_freq(&self) -> BTreeMap<usize, usize> {
         let mut freq = BTreeMap::new();
-        for (a, b) in self.ridx.iter().copied().tuple_windows() {
+        for (a, b) in self.offsets.iter().copied().tuple_windows() {
             *freq.entry(b - a).or_insert(0) += 1;
         }
         freq
     }
 
     fn get_row_entries(&self, i: usize) -> (&[usize], &[T]) {
-        let (j, k) = (self.ridx[i], self.ridx[i + 1]);
-        (&self.cidx[j..k], &self.vals[j..k])
+        let (j, k) = (self.offsets[i], self.offsets[i + 1]);
+        (&self.indices[j..k], &self.vals[j..k])
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = ((usize, usize), &T)> {
@@ -57,18 +56,19 @@ impl<T: Num> CsrMatrix<T> {
             && self.invariant4()
             && self.invariant5()
             && self.invariant6()
+            && self.invariant7()
     }
 
     fn invariant1(&self) -> bool {
-        self.cidx.len() == self.vals.len()
+        self.indices.len() == self.vals.len()
     }
 
     fn invariant2(&self) -> bool {
-        self.ridx.len() == self.rows + 1 && self.ridx[self.rows] == self.cidx.len()
+        self.offsets.len() == self.rows + 1 && self.offsets[self.rows] == self.indices.len()
     }
 
     fn invariant3(&self) -> bool {
-        self.ridx.is_sorted()
+        is_sorted(&self.offsets)
     }
 
     fn invariant4(&self) -> bool {
@@ -76,19 +76,23 @@ impl<T: Num> CsrMatrix<T> {
     }
 
     fn invariant5(&self) -> bool {
-        self.cidx.iter().all(|c| (0..self.cols).contains(c))
+        self.indices.iter().all(|c| (0..self.cols).contains(c))
     }
 
     fn invariant6(&self) -> bool {
-        self.ridx
+        self.offsets
             .iter()
             .copied()
             .tuple_windows()
-            .all(|(a, b)| is_increasing(&self.cidx[a..b]))
+            .all(|(a, b)| is_increasing(&self.indices[a..b]))
+    }
+
+    fn invariant7(&self) -> bool {
+        self.rows > 0 && self.cols > 0
     }
 
     fn transpose(mut self) -> CsrMatrix<T> {
-        let mut new = CsrMatrix::new(self.cols, self.rows);
+        let mut new = CsrMatrix::new(self.cols, self.rows).unwrap();
         for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
             if let Some(t) = self.set_element((i, j), T::zero()) {
                 new.set_element((j, i), t);
@@ -106,17 +110,20 @@ impl<T: Num> CsrMatrix<T> {
     }
 
     fn nnz(&self) -> usize {
-        self.cidx.len()
+        self.indices.len()
     }
 
-    fn identity(n: usize) -> Self {
-        CsrMatrix {
+    fn identity(n: usize) -> Result<Self, MatrixError> {
+        if n == 0 {
+            return Err(MatrixError::HasZeroDimension);
+        }
+        Ok(CsrMatrix {
             rows: n,
             cols: n,
             vals: repeat_with(T::one).take(n).collect(),
-            cidx: (0..n).collect(),
-            ridx: (0..=n).collect(),
-        }
+            indices: (0..n).collect(),
+            offsets: (0..=n).collect(),
+        })
     }
 
     fn set_element(&mut self, (i, j): (usize, usize), t: T) -> Option<T> {
@@ -124,11 +131,11 @@ impl<T: Num> CsrMatrix<T> {
 
         match self.get_row_entries(i).0.binary_search(&j) {
             Ok(pos) => {
-                let pos = self.ridx[i] + pos;
+                let pos = self.offsets[i] + pos;
                 if t.is_zero() {
-                    self.cidx.remove(pos);
+                    self.indices.remove(pos);
                     for m in i + 1..=self.rows {
-                        self.ridx[m] -= 1;
+                        self.offsets[m] -= 1;
                     }
                     Some(self.vals.remove(pos))
                 } else {
@@ -137,11 +144,11 @@ impl<T: Num> CsrMatrix<T> {
             }
             Err(pos) => {
                 if !t.is_zero() {
-                    let pos = self.ridx[i] + pos;
+                    let pos = self.offsets[i] + pos;
                     self.vals.insert(pos, t);
-                    self.cidx.insert(pos, j);
+                    self.indices.insert(pos, j);
                     for m in i + 1..=self.rows {
-                        self.ridx[m] += 1;
+                        self.offsets[m] += 1;
                     }
                 }
                 None
@@ -149,18 +156,21 @@ impl<T: Num> CsrMatrix<T> {
         }
     }
 
-    fn new(rows: usize, cols: usize) -> CsrMatrix<T> {
+    fn new(rows: usize, cols: usize) -> Result<CsrMatrix<T>, MatrixError> {
+        if rows == 0 || cols == 0 {
+            return Err(MatrixError::HasZeroDimension);
+        }
         let capacity = 1000.min(rows * cols / 5);
-        CsrMatrix {
+        Ok(CsrMatrix {
             rows,
             cols,
             vals: Vec::with_capacity(capacity),
-            cidx: Vec::with_capacity(capacity),
-            ridx: vec![0; rows + 1],
-        }
+            indices: Vec::with_capacity(capacity),
+            offsets: vec![0; rows + 1],
+        })
     }
 
-    fn new_square(n: usize) -> CsrMatrix<T> {
+    fn new_square(n: usize) -> Result<CsrMatrix<T>, MatrixError> {
         Self::new(n, n)
     }
 }
@@ -177,11 +187,11 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
             .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
     }
 
-    fn new(rows: usize, cols: usize) -> Self {
+    fn new(rows: usize, cols: usize) -> Result<Self, MatrixError> {
         Self::new(rows, cols)
     }
 
-    fn new_square(n: usize) -> Self {
+    fn new_square(n: usize) -> Result<Self, MatrixError> {
         Self::new_square(n)
     }
 
@@ -201,7 +211,7 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
         self.set_element(pos, t)
     }
 
-    fn identity(n: usize) -> Self {
+    fn identity(n: usize) -> Result<Self, MatrixError> {
         Self::identity(n)
     }
 
@@ -211,35 +221,15 @@ impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
 }
 
 impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
-    pub fn mul_dense(&self, rhs: &Self) -> Self {
-        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
-
-        let mut m: CsrMatrix<T> = CsrMatrix::new(self.rows, rhs.cols);
-
-        for i in 0..self.rows {
-            let (lo, hi) = (self.ridx[i], self.ridx[i + 1]);
-            for j in lo..hi {
-                let (rcidx, rvals) = rhs.get_row_entries(self.cidx[j]);
-                for (&k, t1) in rcidx.iter().zip(rvals.iter()) {
-                    let mut t = m.get_element((i, k)).into_owned();
-                    t += self.vals[j].clone() * t1.clone();
-                    m.set_element((i, k), t);
-                }
-            }
-        }
-
-        m
-    }
-
     pub fn mul_hash(&self, rhs: &Self) -> Self {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
         let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.ridx
+        self.offsets
             .par_iter()
-            .zip(self.ridx.par_iter().skip(1))
+            .zip(self.offsets.par_iter().skip(1))
             .map(|(&a, &b)| {
-                let capacity = self.cidx[a..b]
+                let capacity = self.indices[a..b]
                     .iter()
                     .map(|&k| rhs.get_row_entries(k).0.len())
                     .sum();
@@ -248,7 +238,7 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
                     BuildHasherDefault::<FxHasher>::default(),
                 );
 
-                self.cidx[a..b]
+                self.indices[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
                     .flat_map(|(&k, t)| {
@@ -280,8 +270,8 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
             rows: self.rows,
             cols: rhs.cols,
             vals,
-            cidx,
-            ridx,
+            indices: cidx,
+            offsets: ridx,
         }
     }
 
@@ -289,13 +279,13 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
         let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.ridx
+        self.offsets
             .par_iter()
-            .zip(self.ridx.par_iter().skip(1))
+            .zip(self.offsets.par_iter().skip(1))
             .map(|(&a, &b)| {
                 let mut row = BTreeMap::new();
 
-                self.cidx[a..b]
+                self.indices[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
                     .for_each(|(&k, t)| {
@@ -319,8 +309,8 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
             rows: self.rows,
             cols: rhs.cols,
             vals,
-            cidx,
-            ridx,
+            indices: cidx,
+            offsets: ridx,
         }
     }
 
@@ -328,11 +318,11 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
         let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.ridx
+        self.offsets
             .par_iter()
-            .zip(self.ridx.par_iter().skip(1))
+            .zip(self.offsets.par_iter().skip(1))
             .map(|(&a, &b)| {
-                self.cidx[a..b]
+                self.indices[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
                     .map(|(&k, t)| {
@@ -367,8 +357,8 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
             rows: self.rows,
             cols: rhs.cols,
             vals,
-            cidx,
-            ridx,
+            indices: cidx,
+            offsets: ridx,
         }
     }
 
@@ -379,11 +369,11 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
 
     fn rows_to_threads(&self, rhs: &Self) -> Vec<usize> {
         let flop: Vec<usize> = self
-            .ridx
+            .offsets
             .par_iter()
-            .zip(self.ridx.par_iter().skip(1))
+            .zip(self.offsets.par_iter().skip(1))
             .map(|(&a, &b)| {
-                self.cidx[a..b]
+                self.indices[a..b]
                     .iter()
                     .map(|&k| rhs.get_row_entries(k).0.len())
                     .sum()
@@ -424,18 +414,18 @@ impl<T: Num> Add for CsrMatrix<T> {
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
 
         for ((a, b), (c, d)) in self
-            .ridx
+            .offsets
             .iter()
             .copied()
             .tuple_windows()
-            .zip(rhs.ridx.iter().copied().tuple_windows())
+            .zip(rhs.offsets.iter().copied().tuple_windows())
         {
-            let (mut rcidx, mut rvals) = self.cidx[a..b]
+            let (mut rcidx, mut rvals) = self.indices[a..b]
                 .iter()
                 .copied()
                 .zip(self.vals.splice(a..b, repeat_with(T::zero).take(b - a)))
                 .merge_join_by(
-                    rhs.cidx[c..d]
+                    rhs.indices[c..d]
                         .iter()
                         .copied()
                         .zip(rhs.vals.splice(c..d, repeat_with(T::zero).take(d - c))),
@@ -460,8 +450,8 @@ impl<T: Num> Add for CsrMatrix<T> {
             rows: self.rows,
             cols: self.cols,
             vals,
-            cidx,
-            ridx,
+            indices: cidx,
+            offsets: ridx,
         }
     }
 }
@@ -498,8 +488,39 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
             rows,
             cols,
             vals,
-            cidx,
-            ridx,
+            indices: cidx,
+            offsets: ridx,
         }
+    }
+}
+
+#[cfg(test)]
+impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T> {
+    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl proptest::strategy::Strategy<Value = CsrMatrix<T>> {
+        use proptest::prelude::*;
+        repeat_with(|| proptest::sample::subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
+            .take(rows)
+            .collect::<Vec<_>>()
+            .prop_flat_map(move |cidx| {
+                let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
+                for mut rcidx in cidx {
+                    ridx.push(ridx.last().unwrap() + rcidx.len());
+                    cidx_flattened.append(&mut rcidx);
+                }
+                repeat_with(|| T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()))
+                    .take(cidx_flattened.len())
+                    .collect::<Vec<_>>()
+                    .prop_map(move |vals| CsrMatrix {
+                        rows,
+                        cols,
+                        vals,
+                        indices: cidx_flattened.clone(),
+                        offsets: ridx.clone(),
+                    })
+            })
+    }
+
+    pub fn arb_matrix() -> impl proptest::strategy::Strategy<Value = Self> {
+        crate::proptest::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
     }
 }

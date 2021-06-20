@@ -1,22 +1,30 @@
-#![feature(is_sorted)]
 use std::{borrow::Cow, ops::Range};
+use thiserror::Error;
 
-mod arbitrary;
+pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
 #[cfg(test)]
 pub mod proptest;
+#[cfg(test)]
+mod tests;
 
-pub trait Matrix<T: ToOwned> {
-    fn new(rows: usize, cols: usize) -> Self;
-    fn new_square(n: usize) -> Self;
+#[derive(Error, Debug)]
+pub enum MatrixError {
+    #[error("number of rows is 0 or number of columns is 0")]
+    HasZeroDimension,
+}
+
+pub trait Matrix<T: ToOwned>: Sized {
+    fn new(rows: usize, cols: usize) -> Result<Self, MatrixError>;
+    fn new_square(n: usize) -> Result<Self, MatrixError>;
+    fn identity(n: usize) -> Result<Self, MatrixError>;
     fn rows(&self) -> usize;
     fn cols(&self) -> usize;
     // the number of nonzero entries in the matrix
     fn nnz(&self) -> usize;
     fn get_element(&self, pos: (usize, usize)) -> Cow<T>;
     fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T>;
-    fn identity(n: usize) -> Self;
     fn transpose(self) -> Self;
 }
 
@@ -32,6 +40,18 @@ fn is_increasing(s: &[usize]) -> bool {
     let mut max = None;
     for i in s {
         if Some(i) > max {
+            max = Some(i);
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_sorted(s: &[usize]) -> bool {
+    let mut max = None;
+    for i in s {
+        if Some(i) >= max {
             max = Some(i);
         } else {
             return false;
@@ -93,7 +113,6 @@ macro_rules! make_bench_mul {
                 let f = entry.path().file_name().unwrap();
                 match parse_matrix_market::<i64, f64>(&fs::read_to_string(entry.path()).unwrap())
                     .unwrap()
-                    .1
                 {
                     MatrixType::Integer(m) => {
                         inner(c, f, m);

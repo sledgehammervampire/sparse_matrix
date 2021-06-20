@@ -8,7 +8,7 @@ const MAX_SIZE: usize = 100;
 pub fn arb_matrix<T: Arbitrary, F: Fn(usize, usize) -> S, S: Strategy>(
     arb_matrix_fixed_size: F,
 ) -> impl Strategy<Value = S::Value> {
-    (0..MAX_SIZE, 0..MAX_SIZE).prop_flat_map(move |(rows, cols)| arb_matrix_fixed_size(rows, cols))
+    (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(move |(rows, cols)| arb_matrix_fixed_size(rows, cols))
 }
 
 pub fn arb_add_pair_fixed_size<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S, S: Strategy>(
@@ -30,7 +30,7 @@ pub fn arb_add_pair<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S + Copy,
 where
     S::Value: Matrix<T> + Clone,
 {
-    (0..MAX_SIZE, 0..MAX_SIZE).prop_flat_map(move |(rows, cols)| {
+    (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(move |(rows, cols)| {
         arb_add_pair_fixed_size(rows, cols, arb_matrix_fixed_size)
     })
 }
@@ -55,6 +55,6 @@ pub fn arb_mul_pair<T: Arbitrary + Clone + Num, F: Fn(usize, usize) -> S + Copy,
 where
     S::Value: Matrix<T> + Clone,
 {
-    (0..MAX_SIZE, 0..MAX_SIZE, 0..MAX_SIZE)
+    (1..MAX_SIZE, 1..MAX_SIZE, 1..MAX_SIZE)
         .prop_flat_map(move |(l, n, p)| arb_mul_pair_fixed_size(l, n, p, arb_matrix_fixed_size))
 }
