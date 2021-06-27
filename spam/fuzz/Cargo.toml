@@ -11,6 +11,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+proptest = "1.0.0"
 
 [dependencies.spam]
 path = ".."
@@ -21,38 +22,13 @@ features = []
 members = ["."]
 
 [[bin]]
-name = "arb_dok_invariants"
-path = "fuzz_targets/arb_dok_invariants.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "arb_csr_invariants"
-path = "fuzz_targets/arb_csr_invariants.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "set_element"
-path = "fuzz_targets/set_element.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "add"
-path = "fuzz_targets/add.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "mul"
-path = "fuzz_targets/mul.rs"
-test = false
-doc = false
-
-[[bin]]
 name = "mkl_roundtrip"
 path = "fuzz_targets/mkl_roundtrip.rs"
 test = false
 doc = false
 
+[[bin]]
+name = "mkl_spmm"
+path = "fuzz_targets/mkl_spmm.rs"
+test = false
+doc = false
