@@ -163,7 +163,7 @@ mod csr {
 
     use crate::{
         csr_matrix::{
-            ffi::{MklCsrMatrix, MklSparseMatrix},
+            ffi::{CMklSparseMatrix, MklCsrMatrix, RustMklSparseMatrix},
             CsrMatrix,
         },
         dok_matrix::DokMatrix,
@@ -392,16 +392,22 @@ mod csr {
     }
 
     #[test]
-    fn mkl_roundtrip() {
+    fn mkl_spmm() {
         let mut runner = TestRunner::default();
         runner
-            .run(&CsrMatrix::<f64>::arb_matrix(), |m| {
-                let mut m1 = MklCsrMatrix::try_from(m.clone()).unwrap();
-                let m2 = MklSparseMatrix::try_from(m1).unwrap();
-                // let m2 = MklCsrMatrix::try_from(m2).unwrap();
-                // assert_eq!(m1, m2);
-                Ok(())
-            })
+            .run(
+                &arb_mul_pair(CsrMatrix::<f64>::arb_fixed_size_matrix),
+                |MulPair(m1, m2)| {
+                    let mut m3 = MklCsrMatrix::try_from(m1.clone()).unwrap();
+                    let m3 =
+                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m3).unwrap());
+                    let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
+                    let m4 =
+                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m4).unwrap());
+                    CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
+                    Ok(())
+                },
+            )
             .unwrap();
     }
 }

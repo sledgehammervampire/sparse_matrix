@@ -1,2 +1,2 @@
 [workspace]
-members = ["spam", "intel-mkl-spblas-sys"]
+members = ["spam"]

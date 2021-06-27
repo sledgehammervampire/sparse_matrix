@@ -11,14 +11,13 @@ pub fn arb_fixed_size_matrix<'a, T: arbitrary::Arbitrary<'a> + Num + Clone, M: M
     if rows == 0 || cols == 0 {
         return Ok(Err(MatrixError::HasZeroDimension));
     }
-    let mut m = M::new(rows, cols).unwrap();
+    let mut matrix = M::new(rows, cols).unwrap();
     for _ in 0..u.arbitrary_len::<(usize, usize, T)>()? {
         let i = u.int_in_range(0..=rows - 1)?;
         let j = u.int_in_range(0..=cols - 1)?;
-        let t = u.arbitrary()?;
-        m.set_element((i, j), t);
+        matrix.set_element((i, j), u.arbitrary()?);
     }
-    Ok(Ok(m))
+    Ok(Ok(matrix))
 }
 
 pub fn arb_add_pair_fixed_size<'a, T: Arbitrary<'a> + Num + Clone, M: Matrix<T>>(

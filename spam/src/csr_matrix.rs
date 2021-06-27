@@ -9,7 +9,7 @@ use std::{
     hash::BuildHasherDefault,
     iter::repeat_with,
     mem,
-    ops::{Add, Mul},
+    ops::{Add, Mul, Sub},
 };
 
 use crate::{dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix, MatrixError};
@@ -172,6 +172,59 @@ impl<T: Num> CsrMatrix<T> {
 
     fn new_square(n: usize) -> Result<CsrMatrix<T>, MatrixError> {
         Self::new(n, n)
+    }
+
+    fn apply_elementwise<F>(mut self, mut rhs: Self, f: &F) -> Self
+    where
+        F: Fn(T, T) -> T,
+    {
+        assert_eq!(
+            (self.rows, self.cols),
+            (rhs.rows, rhs.cols),
+            "matrices must have identical dimensions"
+        );
+        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+
+        for ((a, b), (c, d)) in self
+            .offsets
+            .iter()
+            .copied()
+            .tuple_windows()
+            .zip(rhs.offsets.iter().copied().tuple_windows())
+        {
+            let (mut rcidx, mut rvals) = self.indices[a..b]
+                .iter()
+                .copied()
+                .zip(self.vals.splice(a..b, repeat_with(T::zero).take(b - a)))
+                .merge_join_by(
+                    rhs.indices[c..d]
+                        .iter()
+                        .copied()
+                        .zip(rhs.vals.splice(c..d, repeat_with(T::zero).take(d - c))),
+                    |(c1, _), (c2, _)| c1.cmp(c2),
+                )
+                .filter_map(|eob| match eob {
+                    itertools::EitherOrBoth::Both((c, t1), (_, t2)) => {
+                        let t = f(t1, t2);
+                        (!t.is_zero()).then(|| (c, t))
+                    }
+                    itertools::EitherOrBoth::Left((c, t))
+                    | itertools::EitherOrBoth::Right((c, t)) => Some((c, t)),
+                })
+                .unzip();
+
+            vals.append(&mut rvals);
+            cidx.append(&mut rcidx);
+            ridx.push(vals.len());
+        }
+
+        CsrMatrix {
+            rows: self.rows,
+            cols: self.cols,
+            vals,
+            indices: cidx,
+            offsets: ridx,
+        }
     }
 }
 
@@ -405,54 +458,16 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
 impl<T: Num> Add for CsrMatrix<T> {
     type Output = CsrMatrix<T>;
 
-    fn add(mut self, mut rhs: Self) -> Self::Output {
-        assert_eq!(
-            (self.rows, self.cols),
-            (rhs.rows, rhs.cols),
-            "matrices must have identical dimensions"
-        );
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
+    fn add(self, rhs: Self) -> Self::Output {
+        self.apply_elementwise(rhs, &T::add)
+    }
+}
 
-        for ((a, b), (c, d)) in self
-            .offsets
-            .iter()
-            .copied()
-            .tuple_windows()
-            .zip(rhs.offsets.iter().copied().tuple_windows())
-        {
-            let (mut rcidx, mut rvals) = self.indices[a..b]
-                .iter()
-                .copied()
-                .zip(self.vals.splice(a..b, repeat_with(T::zero).take(b - a)))
-                .merge_join_by(
-                    rhs.indices[c..d]
-                        .iter()
-                        .copied()
-                        .zip(rhs.vals.splice(c..d, repeat_with(T::zero).take(d - c))),
-                    |(c1, _), (c2, _)| c1.cmp(c2),
-                )
-                .filter_map(|eob| match eob {
-                    itertools::EitherOrBoth::Both((c, t1), (_, t2)) => {
-                        let t = t1 + t2;
-                        (!t.is_zero()).then(|| (c, t))
-                    }
-                    itertools::EitherOrBoth::Left((c, t))
-                    | itertools::EitherOrBoth::Right((c, t)) => Some((c, t)),
-                })
-                .unzip();
+impl<T: Num> Sub for CsrMatrix<T> {
+    type Output = CsrMatrix<T>;
 
-            vals.append(&mut rvals);
-            cidx.append(&mut rcidx);
-            ridx.push(vals.len());
-        }
-
-        CsrMatrix {
-            rows: self.rows,
-            cols: self.cols,
-            vals,
-            indices: cidx,
-            offsets: ridx,
-        }
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.apply_elementwise(rhs, &T::sub)
     }
 }
 
@@ -496,7 +511,10 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
 
 #[cfg(test)]
 impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T> {
-    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl proptest::strategy::Strategy<Value = CsrMatrix<T>> {
+    pub fn arb_fixed_size_matrix(
+        rows: usize,
+        cols: usize,
+    ) -> impl proptest::strategy::Strategy<Value = CsrMatrix<T>> {
         use proptest::prelude::*;
         repeat_with(|| proptest::sample::subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
             .take(rows)

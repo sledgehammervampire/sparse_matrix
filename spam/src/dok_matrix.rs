@@ -482,7 +482,10 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
 
 #[cfg(test)]
 impl<T: proptest::arbitrary::Arbitrary + Num + Clone> DokMatrix<T> {
-    pub fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl proptest::strategy::Strategy<Value = Self> {
+    pub fn arb_fixed_size_matrix(
+        rows: usize,
+        cols: usize,
+    ) -> impl proptest::strategy::Strategy<Value = Self> {
         use proptest::prelude::*;
         if rows == 0 || cols == 0 {}
         proptest::collection::btree_map(

@@ -3,7 +3,7 @@ use proptest::{arbitrary::Arbitrary, strategy::Strategy};
 
 use crate::{AddPair, Matrix, MulPair};
 
-const MAX_SIZE: usize = 100;
+const MAX_SIZE: usize = 20;
 
 pub fn arb_matrix<T: Arbitrary, F: Fn(usize, usize) -> S, S: Strategy>(
     arb_matrix_fixed_size: F,

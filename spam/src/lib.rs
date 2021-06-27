@@ -5,7 +5,7 @@ pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
 #[cfg(test)]
-pub mod proptest;
+mod proptest;
 #[cfg(test)]
 mod tests;
 

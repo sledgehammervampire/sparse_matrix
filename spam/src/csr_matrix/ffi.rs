@@ -1,88 +1,185 @@
+use core::slice;
 use std::{
     convert::{TryFrom, TryInto},
+    marker::PhantomData,
     mem::{self, MaybeUninit},
     num::TryFromIntError,
-    ptr,
+    ops::Mul,
 };
 
 use super::CsrMatrix;
-use intel_mkl_spblas_sys::{
-    mkl_sparse_d_create_csr, mkl_sparse_destroy, sparse_index_base_t_SPARSE_INDEX_BASE_ZERO,
-    sparse_matrix_t, sparse_status_t_SPARSE_STATUS_ALLOC_FAILED,
-    sparse_status_t_SPARSE_STATUS_EXECUTION_FAILED, sparse_status_t_SPARSE_STATUS_INTERNAL_ERROR,
-    sparse_status_t_SPARSE_STATUS_INVALID_VALUE, sparse_status_t_SPARSE_STATUS_NOT_INITIALIZED,
-    sparse_status_t_SPARSE_STATUS_NOT_SUPPORTED, sparse_status_t_SPARSE_STATUS_SUCCESS,
+use mkl_sys::{
+    mkl_sparse_d_create_csr, mkl_sparse_d_export_csr, mkl_sparse_destroy, mkl_sparse_spmm,
+    sparse_index_base_t::SPARSE_INDEX_BASE_ZERO, sparse_matrix_t,
+    sparse_operation_t::SPARSE_OPERATION_NON_TRANSPOSE, sparse_status_t::*, MKL_INT,
 };
-use libc::c_double;
 use num_enum::TryFromPrimitive;
-use thiserror::Error;
 
-// CsrMatrix into MklCsrMatrix
-// &MklCsrMatrix into MklSparseMatrix
-
-#[derive(Debug, PartialEq, Eq)]
 pub struct MklCsrMatrix<T> {
-    rows: i32,
-    cols: i32,
-    indices: Vec<i32>,
+    rows: MKL_INT,
+    cols: MKL_INT,
     vals: Vec<T>,
-    offsets: Vec<i32>,
+    indices: Vec<MKL_INT>,
+    offsets: Vec<MKL_INT>,
 }
 
-impl TryFrom<CsrMatrix<f64>> for MklCsrMatrix<c_double> {
+pub struct RustMklSparseMatrix<'a, T> {
+    handle: sparse_matrix_t,
+    _phantom: PhantomData<&'a T>,
+}
+
+impl<T> Drop for RustMklSparseMatrix<'_, T> {
+    fn drop(&mut self) {
+        unsafe {
+            mkl_sparse_destroy(self.handle);
+        }
+    }
+}
+
+pub struct CMklSparseMatrix<T> {
+    handle: sparse_matrix_t,
+    _phantom: PhantomData<*const T>,
+}
+
+impl<T> Drop for CMklSparseMatrix<T> {
+    fn drop(&mut self) {
+        unsafe {
+            mkl_sparse_destroy(self.handle);
+        }
+    }
+}
+
+impl<T> From<RustMklSparseMatrix<'_, T>> for CMklSparseMatrix<T> {
+    fn from(m: RustMklSparseMatrix<'_, T>) -> Self {
+        let ret = CMklSparseMatrix {
+            handle: m.handle,
+            _phantom: PhantomData,
+        };
+        mem::forget(m);
+        ret
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("out of range integral type conversion attempted")]
+    FromInt(#[from] TryFromIntError),
+    #[error("mkl error: {0:?}")]
+    Mkl(#[from] MklError),
+}
+
+#[derive(TryFromPrimitive, thiserror::Error, Debug)]
+#[repr(u32)]
+pub enum MklError {
+    #[error("The routine encountered an empty handle or matrix array.")]
+    NotInitialized = SPARSE_STATUS_NOT_INITIALIZED,
+    #[error("Internal memory allocation failed.")]
+    AllocFailed = SPARSE_STATUS_ALLOC_FAILED,
+    #[error("The input parameters contain an invalid value.")]
+    InvalidValue = SPARSE_STATUS_INVALID_VALUE,
+    #[error("Execution failed.")]
+    ExecutionFailed = SPARSE_STATUS_EXECUTION_FAILED,
+    #[error("An error in algorithm implementation occurred.")]
+    InternalError = SPARSE_STATUS_INTERNAL_ERROR,
+    #[error("The requested operation is not supported.")]
+    NotSupported = SPARSE_STATUS_NOT_SUPPORTED,
+}
+
+impl TryFrom<CsrMatrix<f64>> for MklCsrMatrix<f64> {
     type Error = TryFromIntError;
 
-    fn try_from(
-        CsrMatrix {
-            rows,
-            cols,
-            vals,
-            indices,
-            offsets,
-        }: CsrMatrix<f64>,
-    ) -> Result<Self, Self::Error> {
-        let rows = rows.try_into()?;
-        let cols = cols.try_into()?;
-        let offsets = offsets
+    fn try_from(m: CsrMatrix<f64>) -> Result<Self, Self::Error> {
+        let rows = m.rows.try_into()?;
+        let cols = m.cols.try_into()?;
+        let offsets: Vec<_> = m
+            .offsets
             .into_iter()
-            .map(|i| i32::try_from(i))
-            .collect::<Result<Vec<_>, _>>()?;
-        let indices = indices
+            .map(MKL_INT::try_from)
+            .collect::<Result<_, _>>()?;
+        let indices: Vec<_> = m
+            .indices
             .into_iter()
-            .map(|i| i32::try_from(i))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(MKL_INT::try_from)
+            .collect::<Result<_, _>>()?;
         Ok(MklCsrMatrix {
             rows,
             cols,
-            vals,
+            vals: m.vals,
             indices,
             offsets,
         })
     }
 }
 
-impl TryFrom<MklCsrMatrix<c_double>> for CsrMatrix<f64> {
-    type Error = TryFromIntError;
+impl<'a> TryFrom<&'a mut MklCsrMatrix<f64>> for RustMklSparseMatrix<'a, f64> {
+    type Error = MklError;
 
-    fn try_from(
-        MklCsrMatrix {
-            rows,
-            cols,
-            vals,
-            indices,
-            offsets,
-        }: MklCsrMatrix<c_double>,
-    ) -> Result<Self, Self::Error> {
-        let rows = rows.try_into()?;
-        let cols = cols.try_into()?;
-        let offsets = offsets
-            .into_iter()
-            .map(|i| usize::try_from(i))
-            .collect::<Result<Vec<_>, _>>()?;
-        let indices = indices
-            .into_iter()
-            .map(|i| usize::try_from(i))
-            .collect::<Result<Vec<_>, _>>()?;
+    fn try_from(m: &'a mut MklCsrMatrix<f64>) -> Result<Self, Self::Error> {
+        let mut handle = MaybeUninit::uninit();
+        let rows_start = m.offsets.as_mut_ptr();
+        let rows_end = rows_start.wrapping_add(1);
+        let status = unsafe {
+            mkl_sparse_d_create_csr(
+                handle.as_mut_ptr(),
+                SPARSE_INDEX_BASE_ZERO,
+                m.rows,
+                m.cols,
+                rows_start,
+                rows_end,
+                m.indices.as_mut_ptr(),
+                m.vals.as_mut_ptr(),
+            )
+        };
+        if status != SPARSE_STATUS_SUCCESS {
+            return Err(MklError::try_from(status).unwrap());
+        }
+        Ok(RustMklSparseMatrix {
+            handle: unsafe { handle.assume_init() },
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl TryFrom<CMklSparseMatrix<f64>> for CsrMatrix<f64> {
+    type Error = Error;
+
+    fn try_from(m: CMklSparseMatrix<f64>) -> Result<Self, Self::Error> {
+        let mut indexing = MaybeUninit::uninit();
+        let mut rows = MaybeUninit::uninit();
+        let mut cols = MaybeUninit::uninit();
+        let mut rows_start = MaybeUninit::uninit();
+        let mut rows_end = MaybeUninit::uninit();
+        let mut col_indx = MaybeUninit::uninit();
+        let mut values = MaybeUninit::uninit();
+        let status = unsafe {
+            mkl_sparse_d_export_csr(
+                m.handle,
+                indexing.as_mut_ptr(),
+                rows.as_mut_ptr(),
+                cols.as_mut_ptr(),
+                rows_start.as_mut_ptr(),
+                rows_end.as_mut_ptr(),
+                col_indx.as_mut_ptr(),
+                values.as_mut_ptr(),
+            )
+        };
+        if status != SPARSE_STATUS_SUCCESS {
+            return Err(Error::Mkl(MklError::try_from(status).unwrap()));
+        }
+        let indexing = usize::try_from(unsafe { indexing.assume_init() })?;
+        let rows = usize::try_from(unsafe { rows.assume_init() })?;
+        let cols = usize::try_from(unsafe { cols.assume_init() })?;
+        let mut offsets: Vec<_> = unsafe { slice::from_raw_parts(rows_start.assume_init(), rows) }
+            .iter()
+            .map(|i| Ok(usize::try_from(*i)? - indexing))
+            .collect::<Result<_, TryFromIntError>>()?;
+        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows - 1) }.try_into()?;
+        offsets.push(nnz);
+        let indices: Vec<_> = unsafe { slice::from_raw_parts(col_indx.assume_init(), nnz) }
+            .iter()
+            .map(|i| Ok(usize::try_from(*i)? - indexing))
+            .collect::<Result<_, TryFromIntError>>()?;
+        let vals = unsafe { slice::from_raw_parts(values.assume_init(), nnz) }.to_vec();
         Ok(CsrMatrix {
             rows,
             cols,
@@ -93,104 +190,51 @@ impl TryFrom<MklCsrMatrix<c_double>> for CsrMatrix<f64> {
     }
 }
 
-pub struct MklSparseMatrix<T> {
-    handle: sparse_matrix_t,
-    rows_start: (*mut i32, usize, usize),
-    col_indx: (*mut i32, usize, usize),
-    values: (*mut T, usize, usize),
-}
+impl TryFrom<MklCsrMatrix<f64>> for CsrMatrix<f64> {
+    type Error = TryFromIntError;
 
-impl<T> Drop for MklSparseMatrix<T> {
-    fn drop(&mut self) {
-        unsafe {
-            mkl_sparse_destroy(self.handle);
-            let (ptr, length, capacity) = self.rows_start;
-            drop(Vec::from_raw_parts(ptr, length, capacity));
-            let (ptr, length, capacity) = self.col_indx;
-            drop(Vec::from_raw_parts(ptr, length, capacity));
-            let (ptr, length, capacity) = self.values;
-            drop(Vec::from_raw_parts(ptr, length, capacity));
-        }
-    }
-}
-
-#[derive(TryFromPrimitive, Error, Debug)]
-#[repr(u32)]
-pub enum MklCreateError {
-    #[error("The routine encountered an empty handle or matrix array.")]
-    NotInitialized = sparse_status_t_SPARSE_STATUS_NOT_INITIALIZED,
-    #[error("Internal memory allocation failed.")]
-    AllocFailed = sparse_status_t_SPARSE_STATUS_ALLOC_FAILED,
-    #[error("The input parameters contain an invalid value.")]
-    InvalidValue = sparse_status_t_SPARSE_STATUS_INVALID_VALUE,
-    #[error("Execution failed.")]
-    ExecutionFailed = sparse_status_t_SPARSE_STATUS_EXECUTION_FAILED,
-    #[error("An error in algorithm implementation occurred.")]
-    InternalError = sparse_status_t_SPARSE_STATUS_INTERNAL_ERROR,
-    #[error("The requested operation is not supported.")]
-    NotSupported = sparse_status_t_SPARSE_STATUS_NOT_SUPPORTED,
-}
-
-impl TryFrom<MklCsrMatrix<c_double>> for MklSparseMatrix<c_double> {
-    type Error = MklCreateError;
-
-    fn try_from(
-        MklCsrMatrix {
+    fn try_from(m: MklCsrMatrix<f64>) -> Result<Self, Self::Error> {
+        let rows = m.rows.try_into()?;
+        let cols = m.cols.try_into()?;
+        let offsets: Vec<_> = m
+            .offsets
+            .into_iter()
+            .map(usize::try_from)
+            .collect::<Result<_, _>>()?;
+        let indices: Vec<_> = m
+            .indices
+            .into_iter()
+            .map(usize::try_from)
+            .collect::<Result<_, _>>()?;
+        Ok(CsrMatrix {
             rows,
             cols,
-            mut vals,
-            mut indices,
-            mut offsets,
-        }: MklCsrMatrix<f64>,
-    ) -> Result<Self, Self::Error> {
-        let mut handle = MaybeUninit::uninit();
-        indices.shrink_to_fit();
-        let col_indx: (*mut i32, _, _) = (indices.as_mut_ptr(), indices.len(), indices.capacity());
-        mem::forget(indices);
-        vals.shrink_to_fit();
-        let values: (*mut c_double, _, _) = (vals.as_mut_ptr(), vals.len(), vals.capacity());
-        mem::forget(vals);
-        offsets.shrink_to_fit();
-        let rows_start: (*mut i32, _, _) =
-            (offsets.as_mut_ptr(), offsets.len(), offsets.capacity());
-        mem::forget(offsets);
-        let status = unsafe {
-            mkl_sparse_d_create_csr(
-                handle.as_mut_ptr(),
-                sparse_index_base_t_SPARSE_INDEX_BASE_ZERO,
-                rows,
-                cols,
-                rows_start.0,
-                rows_start.0.wrapping_add(1),
-                col_indx.0,
-                values.0,
-            )
-        };
-        if status != sparse_status_t_SPARSE_STATUS_SUCCESS {
-            return Err(MklCreateError::try_from(status).unwrap());
-        }
-        Ok(MklSparseMatrix {
-            handle: ptr::null_mut(),
-            rows_start,
-            col_indx,
-            values,
+            vals: m.vals,
+            indices,
+            offsets,
         })
     }
 }
 
-#[derive(TryFromPrimitive, Error, Debug)]
-#[repr(u32)]
-pub enum MklExportError {
-    #[error("The routine encountered an empty handle or matrix array.")]
-    NotInitialized = sparse_status_t_SPARSE_STATUS_NOT_INITIALIZED,
-    #[error("Internal memory allocation failed.")]
-    AllocFailed = sparse_status_t_SPARSE_STATUS_ALLOC_FAILED,
-    #[error("The input parameters contain an invalid value.")]
-    InvalidValue = sparse_status_t_SPARSE_STATUS_INVALID_VALUE,
-    #[error("Execution failed.")]
-    ExecutionFailed = sparse_status_t_SPARSE_STATUS_EXECUTION_FAILED,
-    #[error("An error in algorithm implementation occurred.")]
-    InternalError = sparse_status_t_SPARSE_STATUS_INTERNAL_ERROR,
-    #[error("The requested operation is not supported.")]
-    NotSupported = sparse_status_t_SPARSE_STATUS_NOT_SUPPORTED,
+impl Mul for &CMklSparseMatrix<f64> {
+    type Output = Result<CMklSparseMatrix<f64>, Error>;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        let mut res = MaybeUninit::uninit();
+        let status = unsafe {
+            mkl_sparse_spmm(
+                SPARSE_OPERATION_NON_TRANSPOSE,
+                self.handle,
+                rhs.handle,
+                res.as_mut_ptr(),
+            )
+        };
+        if status != SPARSE_STATUS_SUCCESS {
+            return Err(Error::Mkl(MklError::try_from(status).unwrap()));
+        }
+        Ok(CMklSparseMatrix {
+            handle: unsafe { res.assume_init() },
+            _phantom: PhantomData,
+        })
+    }
 }
