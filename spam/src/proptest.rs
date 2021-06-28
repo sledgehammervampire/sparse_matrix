@@ -1,7 +1,10 @@
-use num::Num;
-use proptest::{arbitrary::Arbitrary, strategy::Strategy};
+use num::{Complex, Num};
+use proptest::{
+    arbitrary::{any, Arbitrary},
+    strategy::Strategy,
+};
 
-use crate::{AddPair, Matrix, MulPair};
+use crate::{dok_matrix::DokMatrix, AddPair, ComplexNewtype, Matrix, MulPair};
 
 const MAX_SIZE: usize = 20;
 
@@ -57,4 +60,31 @@ where
 {
     (1..MAX_SIZE, 1..MAX_SIZE, 1..MAX_SIZE)
         .prop_flat_map(move |(l, n, p)| arb_mul_pair_fixed_size(l, n, p, arb_matrix_fixed_size))
+}
+
+impl<T: Arbitrary + Num + Clone> DokMatrix<T> {
+    pub(crate) fn arb_fixed_size_matrix(rows: usize, cols: usize) -> impl Strategy<Value = Self> {
+        proptest::collection::vec(((0..rows, 0..cols), T::arbitrary()), 0..=(2 * rows * cols))
+            .prop_map(move |entries| {
+                let mut m = DokMatrix::new(rows, cols).unwrap();
+                for (pos, t) in entries {
+                    m.set_element(pos, t);
+                }
+                m
+            })
+    }
+
+    pub fn arb_matrix() -> impl Strategy<Value = Self> {
+        arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
+    }
+}
+
+impl<T: Arbitrary> Arbitrary for ComplexNewtype<T> {
+    type Parameters = ();
+    type Strategy =
+        proptest::strategy::Map<(T::Strategy, T::Strategy), fn((T, T)) -> ComplexNewtype<T>>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        (any::<T>(), any::<T>()).prop_map(|(re, im)| ComplexNewtype(Complex { re, im }))
+    }
 }

@@ -56,7 +56,6 @@ impl<T: Num> CsrMatrix<T> {
             && self.invariant4()
             && self.invariant5()
             && self.invariant6()
-            && self.invariant7()
     }
 
     fn invariant1(&self) -> bool {
@@ -72,7 +71,7 @@ impl<T: Num> CsrMatrix<T> {
     }
 
     fn invariant4(&self) -> bool {
-        self.vals.iter().all(|t| !t.is_zero())
+        self.rows > 0 && self.cols > 0
     }
 
     fn invariant5(&self) -> bool {
@@ -87,20 +86,6 @@ impl<T: Num> CsrMatrix<T> {
             .all(|(a, b)| is_increasing(&self.indices[a..b]))
     }
 
-    fn invariant7(&self) -> bool {
-        self.rows > 0 && self.cols > 0
-    }
-
-    fn transpose(mut self) -> CsrMatrix<T> {
-        let mut new = CsrMatrix::new(self.cols, self.rows).unwrap();
-        for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
-            if let Some(t) = self.set_element((i, j), T::zero()) {
-                new.set_element((j, i), t);
-            }
-        }
-        new
-    }
-
     fn rows(&self) -> usize {
         self.rows
     }
@@ -113,43 +98,20 @@ impl<T: Num> CsrMatrix<T> {
         self.indices.len()
     }
 
-    fn identity(n: usize) -> Result<Self, MatrixError> {
-        if n == 0 {
-            return Err(MatrixError::HasZeroDimension);
-        }
-        Ok(CsrMatrix {
-            rows: n,
-            cols: n,
-            vals: repeat_with(T::one).take(n).collect(),
-            indices: (0..n).collect(),
-            offsets: (0..=n).collect(),
-        })
-    }
-
     fn set_element(&mut self, (i, j): (usize, usize), t: T) -> Option<T> {
         assert!(i < self.rows && j < self.cols, "position not in bounds");
 
         match self.get_row_entries(i).0.binary_search(&j) {
             Ok(pos) => {
                 let pos = self.offsets[i] + pos;
-                if t.is_zero() {
-                    self.indices.remove(pos);
-                    for m in i + 1..=self.rows {
-                        self.offsets[m] -= 1;
-                    }
-                    Some(self.vals.remove(pos))
-                } else {
-                    Some(mem::replace(&mut self.vals[pos], t))
-                }
+                Some(mem::replace(&mut self.vals[pos], t))
             }
             Err(pos) => {
-                if !t.is_zero() {
-                    let pos = self.offsets[i] + pos;
-                    self.vals.insert(pos, t);
-                    self.indices.insert(pos, j);
-                    for m in i + 1..=self.rows {
-                        self.offsets[m] += 1;
-                    }
+                let pos = self.offsets[i] + pos;
+                self.vals.insert(pos, t);
+                self.indices.insert(pos, j);
+                for m in i + 1..=self.rows {
+                    self.offsets[m] += 1;
                 }
                 None
             }
@@ -203,13 +165,10 @@ impl<T: Num> CsrMatrix<T> {
                         .zip(rhs.vals.splice(c..d, repeat_with(T::zero).take(d - c))),
                     |(c1, _), (c2, _)| c1.cmp(c2),
                 )
-                .filter_map(|eob| match eob {
-                    itertools::EitherOrBoth::Both((c, t1), (_, t2)) => {
-                        let t = f(t1, t2);
-                        (!t.is_zero()).then(|| (c, t))
-                    }
-                    itertools::EitherOrBoth::Left((c, t))
-                    | itertools::EitherOrBoth::Right((c, t)) => Some((c, t)),
+                .map(|eob| match eob {
+                    itertools::EitherOrBoth::Both((c, t1), (_, t2)) => (c, f(t1, t2)),
+                    itertools::EitherOrBoth::Left((c, t)) => (c, f(t, T::zero())),
+                    itertools::EitherOrBoth::Right((c, t)) => (c, f(T::zero(), t)),
                 })
                 .unzip();
 
@@ -226,6 +185,32 @@ impl<T: Num> CsrMatrix<T> {
             offsets: ridx,
         }
     }
+}
+
+impl <T:Num> CsrMatrix<T> {
+    fn transpose(mut self) -> CsrMatrix<T> {
+        let mut new = CsrMatrix::new(self.cols, self.rows).unwrap();
+        for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
+            if let Some(t) = self.set_element((i, j), T::zero()) {
+                new.set_element((j, i), t);
+            }
+        }
+        new
+    }
+
+    fn identity(n: usize) -> Result<Self, MatrixError> {
+        if n == 0 {
+            return Err(MatrixError::HasZeroDimension);
+        }
+        Ok(CsrMatrix {
+            rows: n,
+            cols: n,
+            vals: repeat_with(T::one).take(n).collect(),
+            indices: (0..n).collect(),
+            offsets: (0..=n).collect(),
+        })
+    }
+
 }
 
 impl<T: Num + Clone> Matrix<T> for CsrMatrix<T> {
@@ -305,11 +290,8 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
                         *entry += t;
                     });
 
-                let mut row = row
-                    .into_iter()
-                    .filter(|(_, t)| !t.is_zero())
-                    .collect::<Vec<_>>();
-                row.par_sort_unstable_by_key(|(c, _)| *c);
+                // let mut row = row.into_iter().collect::<Vec<_>>();
+                // row.par_sort_unstable_by_key(|(c, _)| *c);
                 row.into_iter().unzip()
             })
             .collect_into_vec(&mut rows);
@@ -349,7 +331,7 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T> {
                         });
                     });
 
-                row.into_iter().filter(|(_, t)| !t.is_zero()).unzip()
+                row.into_iter().unzip()
             })
             .collect_into_vec(&mut rows);
         let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
@@ -511,7 +493,7 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T> {
 
 #[cfg(test)]
 impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T> {
-    pub fn arb_fixed_size_matrix(
+    pub(crate) fn arb_fixed_size_matrix(
         rows: usize,
         cols: usize,
     ) -> impl proptest::strategy::Strategy<Value = CsrMatrix<T>> {
@@ -525,7 +507,7 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T> {
                     ridx.push(ridx.last().unwrap() + rcidx.len());
                     cidx_flattened.append(&mut rcidx);
                 }
-                repeat_with(|| T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()))
+                repeat_with(|| T::arbitrary())
                     .take(cidx_flattened.len())
                     .collect::<Vec<_>>()
                     .prop_map(move |vals| CsrMatrix {

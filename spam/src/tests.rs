@@ -1,7 +1,7 @@
 mod dok {
     use std::{fs, num::Wrapping};
 
-    use proptest::{prop_assert, prop_assert_eq, test_runner::TestRunner};
+    use proptest::{prop_assert, test_runner::TestRunner};
     use walkdir::WalkDir;
 
     use crate::{
@@ -139,18 +139,6 @@ mod dok {
             )
             .unwrap();
     }
-
-    // other
-    #[test]
-    fn convert() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&CsrMatrix::<i8>::arb_matrix(), |m| {
-                prop_assert_eq!(&m, &CsrMatrix::from(DokMatrix::from(m.clone())));
-                Ok(())
-            })
-            .unwrap();
-    }
 }
 
 mod csr {
@@ -168,7 +156,7 @@ mod csr {
         },
         dok_matrix::DokMatrix,
         proptest::{arb_add_pair, arb_mul_pair},
-        AddPair, Matrix, MulPair,
+        AddPair, ComplexNewtype, Matrix, MulPair,
     };
 
     const MAX_SIZE: usize = 100;
@@ -233,7 +221,7 @@ mod csr {
                 |AddPair(m1, m2)| {
                     let m = CsrMatrix::from(m1.clone()) + CsrMatrix::from(m2.clone());
                     prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(m, CsrMatrix::from(m1 + m2));
+                    prop_assert_eq!(DokMatrix::from(m), m1 + m2);
                     Ok(())
                 },
             )
@@ -249,7 +237,7 @@ mod csr {
                 |MulPair(m1, m2)| {
                     let m = &CsrMatrix::from(m1.clone()) * &CsrMatrix::from(m2.clone());
                     prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
                     Ok(())
                 },
             )
@@ -265,7 +253,7 @@ mod csr {
                 |MulPair(m1, m2)| {
                     let m = CsrMatrix::from(m1.clone()).mul_hash(&CsrMatrix::from(m2.clone()));
                     prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
                     Ok(())
                 },
             )
@@ -281,7 +269,7 @@ mod csr {
                 |MulPair(m1, m2)| {
                     let m = CsrMatrix::from(m1.clone()).mul_btree(&CsrMatrix::from(m2.clone()));
                     prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
                     Ok(())
                 },
             )
@@ -297,7 +285,7 @@ mod csr {
                 |MulPair(m1, m2)| {
                     let m = CsrMatrix::from(m1.clone()).mul_hash(&CsrMatrix::from(m2.clone()));
                     prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(m, CsrMatrix::from(&m1 * &m2));
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
                     Ok(())
                 },
             )
@@ -311,7 +299,7 @@ mod csr {
             .run(&DokMatrix::<i8>::arb_matrix(), |m| {
                 let m1 = CsrMatrix::from(m.clone()).transpose();
                 prop_assert!(m1.invariants(), "{:?}", m1);
-                prop_assert_eq!(m1, CsrMatrix::from(m.transpose()));
+                prop_assert_eq!(DokMatrix::from(m1), m.transpose());
                 Ok(())
             })
             .unwrap();
@@ -335,7 +323,7 @@ mod csr {
                     m.set_element((i, j), t.clone());
                     m1.set_element((i, j), t.clone());
                     assert!(m1.invariants(), "{:?}", m1);
-                    assert_eq!(m1, CsrMatrix::from(m));
+                    assert_eq!(DokMatrix::from(m1), m);
                     Ok(())
                 },
             )
@@ -392,7 +380,7 @@ mod csr {
     }
 
     #[test]
-    fn mkl_spmm() {
+    fn mkl_spmm_d() {
         let mut runner = TestRunner::default();
         runner
             .run(
@@ -404,7 +392,29 @@ mod csr {
                     let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
                     let m4 =
                         CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m4).unwrap());
-                    CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
+                    let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
+                    prop_assert!(m5.invariants(), "{:?}", m5);
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn mkl_spmm_z() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(
+                &arb_mul_pair(CsrMatrix::<ComplexNewtype<f64>>::arb_fixed_size_matrix),
+                |MulPair(m1, m2)| {
+                    let mut m3 = MklCsrMatrix::try_from(m1.clone()).unwrap();
+                    let m3 =
+                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m3).unwrap());
+                    let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
+                    let m4 =
+                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m4).unwrap());
+                    let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
+                    prop_assert!(m5.invariants(), "{:?}", m5);
                     Ok(())
                 },
             )

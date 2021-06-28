@@ -1,4 +1,6 @@
-use std::{borrow::Cow, ops::Range};
+use mkl_sys::MKL_Complex16;
+use num::{Complex, Num, One, Zero};
+use std::{borrow::Cow, ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign}};
 use thiserror::Error;
 
 pub mod arbitrary;
@@ -66,9 +68,88 @@ struct Slice {
     pub len: usize,
 }
 
-impl From<Slice> for Range<usize> {
+impl From<Slice> for std::ops::Range<usize> {
     fn from(s: Slice) -> Self {
         s.start..s.start + s.len
+    }
+}
+
+macro_rules! impl_bin_op {
+    ($trait:ident,$op:ident) => {
+        impl<T: num::traits::Num + std::clone::Clone> $trait for crate::ComplexNewtype<T> {
+            type Output = Self;
+            fn $op(self, rhs: Self) -> Self::Output {
+                Self(self.0.$op(rhs.0))
+            }
+        }
+    };
+}
+
+macro_rules! impl_bin_op_assign {
+    ($trait:ident,$op:ident) => {
+        impl<T: num::traits::NumAssign + std::clone::Clone> $trait for crate::ComplexNewtype<T> {
+            fn $op(&mut self, rhs: Self) {
+                self.0.$op(rhs.0);
+            }
+        }
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComplexNewtype<T>(Complex<T>);
+
+impl_bin_op!(Add, add);
+impl_bin_op!(Sub, sub);
+impl_bin_op!(Mul, mul);
+impl_bin_op!(Div, div);
+impl_bin_op!(Rem, rem);
+
+impl_bin_op_assign!(AddAssign, add_assign);
+impl_bin_op_assign!(SubAssign, sub_assign);
+impl_bin_op_assign!(MulAssign, mul_assign);
+impl_bin_op_assign!(DivAssign, div_assign);
+impl_bin_op_assign!(RemAssign, rem_assign);
+
+impl<T: Num + Clone> Num for ComplexNewtype<T> {
+    type FromStrRadixErr = <Complex<T> as Num>::FromStrRadixErr;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        let z = num::complex::Complex::from_str_radix(str, radix)?;
+        Ok(ComplexNewtype(z))
+    }
+}
+
+impl<T: Num + Clone> Zero for ComplexNewtype<T> {
+    fn zero() -> Self {
+        ComplexNewtype(Complex::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0.is_zero()
+    }
+}
+
+impl<T: Num + Clone> One for ComplexNewtype<T> {
+    fn one() -> Self {
+        ComplexNewtype(Complex::one())
+    }
+}
+
+impl From<MKL_Complex16> for ComplexNewtype<f64> {
+    fn from(z: MKL_Complex16) -> Self {
+        ComplexNewtype(Complex {
+            re: z.real,
+            im: z.imag,
+        })
+    }
+}
+
+impl From<ComplexNewtype<f64>> for MKL_Complex16 {
+    fn from(z: ComplexNewtype<f64>) -> Self {
+        MKL_Complex16 {
+            real: z.0.re,
+            imag: z.0.im,
+        }
     }
 }
 
@@ -115,7 +196,7 @@ macro_rules! make_bench_mul {
                     .unwrap()
                 {
                     MatrixType::Integer(m) => {
-                        inner(c, f, m);
+                        // inner(c, f, m);
                     }
                     MatrixType::Real(m) => {
                         inner(c, f, m);

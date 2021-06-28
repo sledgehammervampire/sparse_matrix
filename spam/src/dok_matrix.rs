@@ -1,4 +1,4 @@
-use crate::{Matrix, MatrixError};
+use crate::{ComplexNewtype, Matrix, MatrixError};
 use itertools::Itertools;
 use nom::{Finish, IResult};
 use num::Num;
@@ -202,16 +202,24 @@ impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
         DokMatrix {
             rows: old.rows(),
             cols: old.cols(),
-            entries: old.iter().map(|(i, t)| (i, t.clone())).collect(),
+            entries: old
+                .iter()
+                .filter_map(|(i, t)| {
+                    if t.is_zero() {
+                        None
+                    } else {
+                        Some((i, t.clone()))
+                    }
+                })
+                .collect(),
         }
     }
 }
 
-#[derive(Debug)]
 pub enum MatrixType<I, R> {
     Integer(DokMatrix<I>),
     Real(DokMatrix<R>),
-    Complex(DokMatrix<num::complex::Complex<R>>),
+    Complex(DokMatrix<ComplexNewtype<R>>),
 }
 
 #[derive(Error, Debug)]
@@ -228,7 +236,7 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
     enum EntryType<I, R> {
         Integer(BTreeMap<(usize, usize), I>),
         Real(BTreeMap<(usize, usize), R>),
-        Complex(BTreeMap<(usize, usize), num::complex::Complex<R>>),
+        Complex(BTreeMap<(usize, usize), ComplexNewtype<R>>),
     }
 
     fn inner<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
@@ -419,7 +427,7 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                             map_res(recognize_float, str::parse),
                             line_ending,
                         )),
-                        |(r, _, c, _, re, _, im, _)| (r, c, num::complex::Complex { re, im }),
+                        |(r, _, c, _, re, _, im, _)| (r, c, ComplexNewtype (num::complex::Complex{ re, im })),
                     ),
                     entries,
                     general,
@@ -439,7 +447,7 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                             map_res(recognize_float, str::parse),
                             line_ending,
                         )),
-                        |(r, _, c, _, re, _, im, _)| (r, c, num::complex::Complex { re, im }),
+                        |(r, _, c, _, re, _, im, _)| (r, c, ComplexNewtype(num::complex::Complex { re, im })),
                     ),
                     entries,
                     symmetric,
@@ -477,30 +485,5 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
             cols,
             entries,
         })),
-    }
-}
-
-#[cfg(test)]
-impl<T: proptest::arbitrary::Arbitrary + Num + Clone> DokMatrix<T> {
-    pub fn arb_fixed_size_matrix(
-        rows: usize,
-        cols: usize,
-    ) -> impl proptest::strategy::Strategy<Value = Self> {
-        use proptest::prelude::*;
-        if rows == 0 || cols == 0 {}
-        proptest::collection::btree_map(
-            (0..rows, 0..cols),
-            T::arbitrary().prop_filter("T is 0", |t| !t.is_zero()),
-            0..=(rows * cols),
-        )
-        .prop_map(move |entries| DokMatrix {
-            rows,
-            cols,
-            entries,
-        })
-    }
-
-    pub fn arb_matrix() -> impl proptest::strategy::Strategy<Value = Self> {
-        crate::proptest::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
     }
 }
