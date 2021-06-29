@@ -1,8 +1,7 @@
-use crate::{csr_matrix::CsrMatrix, ComplexNewtype, Matrix, MatrixError};
+use crate::{ComplexNewtype, Matrix, MatrixError};
 use itertools::Itertools;
 use nom::{Finish, IResult};
 use num::Num;
-use rand::prelude::SliceRandom;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
@@ -16,7 +15,7 @@ use thiserror::Error;
 pub struct DokMatrix<T> {
     rows: usize,
     cols: usize,
-    entries: BTreeMap<(usize, usize), T>,
+    pub(crate) entries: BTreeMap<(usize, usize), T>,
 }
 
 impl<T: Num> DokMatrix<T> {
@@ -71,7 +70,7 @@ impl<T: Num> DokMatrix<T> {
     }
 
     // output entries with (row, col) lexicographically ordered
-    pub fn entries(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
+    pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
         self.entries.iter().map(|(&p, t)| (p, t))
     }
 
@@ -79,7 +78,7 @@ impl<T: Num> DokMatrix<T> {
         self.rows > 0
             && self.cols > 0
             && self
-                .entries()
+                .iter()
                 .all(|((r, c), t)| r < self.rows && c < self.cols && !t.is_zero())
     }
 
@@ -206,21 +205,6 @@ impl<T: Num + Clone, const IS_SORTED: bool> From<crate::csr_matrix::CsrMatrix<T,
                 })
                 .collect(),
         }
-    }
-}
-
-impl<T: Num + Clone, const IS_SORTED: bool> From<DokMatrix<T>> for CsrMatrix<T, IS_SORTED> {
-    fn from(old: DokMatrix<T>) -> Self {
-        let mut m = CsrMatrix::new(old.rows(), old.cols()).unwrap();
-        let mut entries: Vec<_> = old.entries.into_iter().collect();
-        if !IS_SORTED {
-            let mut rng = rand::thread_rng();
-            entries.shuffle(&mut rng);
-        }
-        for ((i, j), t) in entries {
-            m.set_element((i, j), t);
-        }
-        m
     }
 }
 

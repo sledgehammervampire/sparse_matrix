@@ -136,7 +136,7 @@ mod dok {
             .run(
                 &arb_add_pair(DokMatrix::<i8>::arb_fixed_size_matrix),
                 |AddPair(mut m1, m2)| {
-                    for (pos, t) in m2.entries() {
+                    for (pos, t) in m2.iter() {
                         m1.set_element(pos, t.clone());
                     }
                     prop_assert!(m1.invariants());

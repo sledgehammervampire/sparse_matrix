@@ -1,5 +1,6 @@
 use itertools::{iproduct, Itertools};
 use num::{traits::NumAssign, Num};
+use rand::prelude::SliceRandom;
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use std::{
@@ -10,9 +11,10 @@ use std::{
     iter::repeat_with,
     mem,
     ops::{Add, Mul, Sub},
+    vec,
 };
 
-use crate::{all_distinct, is_increasing, is_sorted, Matrix, MatrixError};
+use crate::{all_distinct, dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix, MatrixError};
 
 pub mod ffi;
 
@@ -295,6 +297,32 @@ impl<T: Num + Clone, const IS_SORTED: bool> Matrix<T> for CsrMatrix<T, IS_SORTED
 
     fn transpose(self) -> Self {
         self.transpose()
+    }
+}
+
+impl<T: Num + Clone, const IS_SORTED: bool> From<DokMatrix<T>> for CsrMatrix<T, IS_SORTED> {
+    fn from(old: DokMatrix<T>) -> Self {
+        let (rows, cols) = (old.rows(), old.cols());
+        let mut entries: Vec<_> = old.entries.into_iter().collect();
+        if !IS_SORTED {
+            let mut rng = rand::thread_rng();
+            entries.shuffle(&mut rng);
+            entries.sort_unstable_by_key(|((i, _), _)| *i);
+        }
+        let (mut vals, mut indices, mut offsets) = (vec![], vec![], vec![]);
+        for ((i, j), t) in entries {
+            offsets.extend(std::iter::repeat(vals.len()).take(i + 1 - offsets.len()));
+            vals.push(t);
+            indices.push(j);
+        }
+        offsets.extend(std::iter::repeat(vals.len()).take(rows + 1 - offsets.len()));
+        CsrMatrix {
+            rows,
+            cols,
+            vals,
+            indices,
+            offsets,
+        }
     }
 }
 
