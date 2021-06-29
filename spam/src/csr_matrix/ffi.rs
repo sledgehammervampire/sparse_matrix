@@ -18,7 +18,7 @@ use mkl_sys::{
 };
 use num_enum::TryFromPrimitive;
 
-pub struct MklCsrMatrix<T> {
+pub struct MklCsrMatrix<T, const IS_SORTED: bool> {
     rows: MKL_INT,
     cols: MKL_INT,
     vals: Vec<T>,
@@ -26,12 +26,12 @@ pub struct MklCsrMatrix<T> {
     offsets: Vec<MKL_INT>,
 }
 
-pub struct RustMklSparseMatrix<'a, T> {
+pub struct RustMklSparseMatrix<'a, T, const IS_SORTED: bool> {
     handle: sparse_matrix_t,
     _phantom: PhantomData<&'a T>,
 }
 
-impl<T> Drop for RustMklSparseMatrix<'_, T> {
+impl<T, const IS_SORTED: bool> Drop for RustMklSparseMatrix<'_, T, IS_SORTED> {
     fn drop(&mut self) {
         unsafe {
             mkl_sparse_destroy(self.handle);
@@ -39,12 +39,12 @@ impl<T> Drop for RustMklSparseMatrix<'_, T> {
     }
 }
 
-pub struct CMklSparseMatrix<T> {
+pub struct CMklSparseMatrix<T, const IS_SORTED: bool> {
     handle: sparse_matrix_t,
     _phantom: PhantomData<*const T>,
 }
 
-impl<T> Drop for CMklSparseMatrix<T> {
+impl<T, const IS_SORTED: bool> Drop for CMklSparseMatrix<T, IS_SORTED> {
     fn drop(&mut self) {
         unsafe {
             mkl_sparse_destroy(self.handle);
@@ -52,14 +52,15 @@ impl<T> Drop for CMklSparseMatrix<T> {
     }
 }
 
-impl<T> From<RustMklSparseMatrix<'_, T>> for CMklSparseMatrix<T> {
-    fn from(m: RustMklSparseMatrix<'_, T>) -> Self {
+impl<T, const IS_SORTED: bool> From<RustMklSparseMatrix<'_, T, IS_SORTED>>
+    for CMklSparseMatrix<T, IS_SORTED>
+{
+    fn from(m: RustMklSparseMatrix<'_, T, IS_SORTED>) -> Self {
         let m = ManuallyDrop::new(m);
-        let ret = CMklSparseMatrix {
+        CMklSparseMatrix {
             handle: m.handle,
             _phantom: PhantomData,
-        };
-        ret
+        }
     }
 }
 
@@ -88,10 +89,10 @@ pub enum MklError {
     NotSupported = SPARSE_STATUS_NOT_SUPPORTED,
 }
 
-impl TryFrom<CsrMatrix<f64>> for MklCsrMatrix<f64> {
+impl<const IS_SORTED: bool> TryFrom<CsrMatrix<f64, IS_SORTED>> for MklCsrMatrix<f64, IS_SORTED> {
     type Error = TryFromIntError;
 
-    fn try_from(m: CsrMatrix<f64>) -> Result<Self, Self::Error> {
+    fn try_from(m: CsrMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
         let rows = m.rows.try_into()?;
         let cols = m.cols.try_into()?;
         let offsets: Vec<_> = m
@@ -114,10 +115,12 @@ impl TryFrom<CsrMatrix<f64>> for MklCsrMatrix<f64> {
     }
 }
 
-impl<'a> TryFrom<&'a mut MklCsrMatrix<f64>> for RustMklSparseMatrix<'a, f64> {
+impl<'a, const IS_SORTED: bool> TryFrom<&'a mut MklCsrMatrix<f64, IS_SORTED>>
+    for RustMklSparseMatrix<'a, f64, IS_SORTED>
+{
     type Error = MklError;
 
-    fn try_from(m: &'a mut MklCsrMatrix<f64>) -> Result<Self, Self::Error> {
+    fn try_from(m: &'a mut MklCsrMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
         let mut handle = MaybeUninit::uninit();
         let rows_start = m.offsets.as_mut_ptr();
         let rows_end = rows_start.wrapping_add(1);
@@ -143,10 +146,12 @@ impl<'a> TryFrom<&'a mut MklCsrMatrix<f64>> for RustMklSparseMatrix<'a, f64> {
     }
 }
 
-impl TryFrom<CMklSparseMatrix<f64>> for CsrMatrix<f64> {
+impl<const IS_SORTED: bool> TryFrom<CMklSparseMatrix<f64, IS_SORTED>>
+    for CsrMatrix<f64, IS_SORTED>
+{
     type Error = Error;
 
-    fn try_from(m: CMklSparseMatrix<f64>) -> Result<Self, Self::Error> {
+    fn try_from(m: CMklSparseMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
         let mut indexing = MaybeUninit::uninit();
         let mut rows = MaybeUninit::uninit();
         let mut cols = MaybeUninit::uninit();
@@ -193,10 +198,10 @@ impl TryFrom<CMklSparseMatrix<f64>> for CsrMatrix<f64> {
     }
 }
 
-impl TryFrom<MklCsrMatrix<f64>> for CsrMatrix<f64> {
+impl<const IS_SORTED: bool> TryFrom<MklCsrMatrix<f64, IS_SORTED>> for CsrMatrix<f64, IS_SORTED> {
     type Error = TryFromIntError;
 
-    fn try_from(m: MklCsrMatrix<f64>) -> Result<Self, Self::Error> {
+    fn try_from(m: MklCsrMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
         let rows = m.rows.try_into()?;
         let cols = m.cols.try_into()?;
         let offsets: Vec<_> = m
@@ -219,8 +224,8 @@ impl TryFrom<MklCsrMatrix<f64>> for CsrMatrix<f64> {
     }
 }
 
-impl Mul for &CMklSparseMatrix<f64> {
-    type Output = Result<CMklSparseMatrix<f64>, Error>;
+impl<const IS_SORTED: bool> Mul for &CMklSparseMatrix<f64, IS_SORTED> {
+    type Output = Result<CMklSparseMatrix<f64, false>, Error>;
 
     fn mul(self, rhs: Self) -> Self::Output {
         let mut res = MaybeUninit::uninit();
@@ -242,10 +247,12 @@ impl Mul for &CMklSparseMatrix<f64> {
     }
 }
 
-impl TryFrom<CsrMatrix<ComplexNewtype<f64>>> for MklCsrMatrix<MKL_Complex16> {
+impl<const IS_SORTED: bool> TryFrom<CsrMatrix<ComplexNewtype<f64>, IS_SORTED>>
+    for MklCsrMatrix<MKL_Complex16, IS_SORTED>
+{
     type Error = TryFromIntError;
 
-    fn try_from(m: CsrMatrix<ComplexNewtype<f64>>) -> Result<Self, Self::Error> {
+    fn try_from(m: CsrMatrix<ComplexNewtype<f64>, IS_SORTED>) -> Result<Self, Self::Error> {
         let rows = m.rows.try_into()?;
         let cols = m.cols.try_into()?;
         let offsets: Vec<_> = m
@@ -269,10 +276,12 @@ impl TryFrom<CsrMatrix<ComplexNewtype<f64>>> for MklCsrMatrix<MKL_Complex16> {
     }
 }
 
-impl<'a> TryFrom<&'a mut MklCsrMatrix<MKL_Complex16>> for RustMklSparseMatrix<'a, MKL_Complex16> {
+impl<'a, const IS_SORTED: bool> TryFrom<&'a mut MklCsrMatrix<MKL_Complex16, IS_SORTED>>
+    for RustMklSparseMatrix<'a, MKL_Complex16, IS_SORTED>
+{
     type Error = MklError;
 
-    fn try_from(m: &'a mut MklCsrMatrix<MKL_Complex16>) -> Result<Self, Self::Error> {
+    fn try_from(m: &'a mut MklCsrMatrix<MKL_Complex16, IS_SORTED>) -> Result<Self, Self::Error> {
         let mut handle = MaybeUninit::uninit();
         let rows_start = m.offsets.as_mut_ptr();
         let rows_end = rows_start.wrapping_add(1);
@@ -298,10 +307,12 @@ impl<'a> TryFrom<&'a mut MklCsrMatrix<MKL_Complex16>> for RustMklSparseMatrix<'a
     }
 }
 
-impl TryFrom<CMklSparseMatrix<MKL_Complex16>> for CsrMatrix<ComplexNewtype<f64>> {
+impl<const IS_SORTED: bool> TryFrom<CMklSparseMatrix<MKL_Complex16, IS_SORTED>>
+    for CsrMatrix<ComplexNewtype<f64>, IS_SORTED>
+{
     type Error = Error;
 
-    fn try_from(m: CMklSparseMatrix<MKL_Complex16>) -> Result<Self, Self::Error> {
+    fn try_from(m: CMklSparseMatrix<MKL_Complex16, IS_SORTED>) -> Result<Self, Self::Error> {
         let mut indexing = MaybeUninit::uninit();
         let mut rows = MaybeUninit::uninit();
         let mut cols = MaybeUninit::uninit();
@@ -348,10 +359,12 @@ impl TryFrom<CMklSparseMatrix<MKL_Complex16>> for CsrMatrix<ComplexNewtype<f64>>
     }
 }
 
-impl TryFrom<MklCsrMatrix<MKL_Complex16>> for CsrMatrix<ComplexNewtype<f64>> {
+impl<const IS_SORTED: bool> TryFrom<MklCsrMatrix<MKL_Complex16, IS_SORTED>>
+    for CsrMatrix<ComplexNewtype<f64>, IS_SORTED>
+{
     type Error = TryFromIntError;
 
-    fn try_from(m: MklCsrMatrix<MKL_Complex16>) -> Result<Self, Self::Error> {
+    fn try_from(m: MklCsrMatrix<MKL_Complex16, IS_SORTED>) -> Result<Self, Self::Error> {
         let rows = m.rows.try_into()?;
         let cols = m.cols.try_into()?;
         let offsets: Vec<_> = m
@@ -375,8 +388,8 @@ impl TryFrom<MklCsrMatrix<MKL_Complex16>> for CsrMatrix<ComplexNewtype<f64>> {
     }
 }
 
-impl Mul for &CMklSparseMatrix<MKL_Complex16> {
-    type Output = Result<CMklSparseMatrix<MKL_Complex16>, Error>;
+impl<const IS_SORTED: bool> Mul for &CMklSparseMatrix<MKL_Complex16, IS_SORTED> {
+    type Output = Result<CMklSparseMatrix<MKL_Complex16, false>, Error>;
 
     fn mul(self, rhs: Self) -> Self::Output {
         let mut res = MaybeUninit::uninit();

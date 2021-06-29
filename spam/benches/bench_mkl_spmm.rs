@@ -13,7 +13,7 @@ use walkdir::WalkDir;
 
 macro_rules! inner {
     ($m:expr, $f:expr, $c:expr) => {
-        let m = CsrMatrix::from($m);
+        let m: CsrMatrix<_, false> = CsrMatrix::from($m);
         let rows = m.rows();
         let cols = m.cols();
         let nnz = m.nnz();

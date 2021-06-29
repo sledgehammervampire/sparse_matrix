@@ -1,7 +1,8 @@
-use crate::{ComplexNewtype, Matrix, MatrixError};
+use crate::{csr_matrix::CsrMatrix, ComplexNewtype, Matrix, MatrixError};
 use itertools::Itertools;
 use nom::{Finish, IResult};
 use num::Num;
+use rand::prelude::SliceRandom;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
@@ -131,16 +132,6 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
     }
 }
 
-impl<T> IntoIterator for DokMatrix<T> {
-    type Item = ((usize, usize), T);
-
-    type IntoIter = std::collections::btree_map::IntoIter<(usize, usize), T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.entries.into_iter()
-    }
-}
-
 impl<T: Num> Add for DokMatrix<T> {
     type Output = DokMatrix<T>;
 
@@ -197,8 +188,10 @@ impl<T: Num + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
-    fn from(old: crate::csr_matrix::CsrMatrix<T>) -> Self {
+impl<T: Num + Clone, const IS_SORTED: bool> From<crate::csr_matrix::CsrMatrix<T, IS_SORTED>>
+    for DokMatrix<T>
+{
+    fn from(old: crate::csr_matrix::CsrMatrix<T, IS_SORTED>) -> Self {
         DokMatrix {
             rows: old.rows(),
             cols: old.cols(),
@@ -213,6 +206,21 @@ impl<T: Num + Clone> From<crate::csr_matrix::CsrMatrix<T>> for DokMatrix<T> {
                 })
                 .collect(),
         }
+    }
+}
+
+impl<T: Num + Clone, const IS_SORTED: bool> From<DokMatrix<T>> for CsrMatrix<T, IS_SORTED> {
+    fn from(old: DokMatrix<T>) -> Self {
+        let mut m = CsrMatrix::new(old.rows(), old.cols()).unwrap();
+        let mut entries: Vec<_> = old.entries.into_iter().collect();
+        if !IS_SORTED {
+            let mut rng = rand::thread_rng();
+            entries.shuffle(&mut rng);
+        }
+        for ((i, j), t) in entries {
+            m.set_element((i, j), t);
+        }
+        m
     }
 }
 
@@ -427,7 +435,9 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                             map_res(recognize_float, str::parse),
                             line_ending,
                         )),
-                        |(r, _, c, _, re, _, im, _)| (r, c, ComplexNewtype (num::complex::Complex{ re, im })),
+                        |(r, _, c, _, re, _, im, _)| {
+                            (r, c, ComplexNewtype(num::complex::Complex { re, im }))
+                        },
                     ),
                     entries,
                     general,
@@ -447,7 +457,9 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                             map_res(recognize_float, str::parse),
                             line_ending,
                         )),
-                        |(r, _, c, _, re, _, im, _)| (r, c, ComplexNewtype(num::complex::Complex { re, im })),
+                        |(r, _, c, _, re, _, im, _)| {
+                            (r, c, ComplexNewtype(num::complex::Complex { re, im }))
+                        },
                     ),
                     entries,
                     symmetric,

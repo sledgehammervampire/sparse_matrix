@@ -1,6 +1,10 @@
 use mkl_sys::MKL_Complex16;
 use num::{Complex, Num, One, Zero};
-use std::{borrow::Cow, ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign}};
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign},
+};
 use thiserror::Error;
 
 pub mod arbitrary;
@@ -48,6 +52,10 @@ fn is_increasing(s: &[usize]) -> bool {
         }
     }
     true
+}
+
+fn all_distinct(s: &[usize]) -> bool {
+    s.iter().copied().collect::<HashSet<_>>().len() == s.len()
 }
 
 fn is_sorted(s: &[usize]) -> bool {
@@ -155,7 +163,7 @@ impl From<ComplexNewtype<f64>> for MKL_Complex16 {
 
 #[macro_export]
 macro_rules! make_bench_mul {
-    ($bench_name:ident, $func_name:ident) => {
+    ($bench_name:ident, $sorted:expr, $func:ident) => {
         pub fn $bench_name(c: &mut criterion::Criterion) {
             use criterion::Criterion;
             use num::traits::NumAssign;
@@ -172,17 +180,70 @@ macro_rules! make_bench_mul {
                 f: &OsStr,
                 m: DokMatrix<T>,
             ) {
-                let m = CsrMatrix::from(m);
+                let m: CsrMatrix<_, $sorted> = CsrMatrix::from(m);
                 c.bench_function(
                     &format!(
                         "bench {:?} {:?} ({}x{}, {} nonzero entries)",
-                        stringify!($func_name),
+                        stringify!($func),
                         f,
                         m.rows(),
                         m.cols(),
                         m.nnz()
                     ),
-                    |b| b.iter(|| m.$func_name(&m)),
+                    |b| b.iter(|| m.$func(&m)),
+                );
+            }
+
+            for entry in WalkDir::new("matrices")
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().extension() == Some("mtx".as_ref()))
+            {
+                let f = entry.path().file_name().unwrap();
+                match parse_matrix_market::<i64, f64>(&fs::read_to_string(entry.path()).unwrap())
+                    .unwrap()
+                {
+                    MatrixType::Integer(m) => {
+                        // inner(c, f, m);
+                    }
+                    MatrixType::Real(m) => {
+                        inner(c, f, m);
+                    }
+                    MatrixType::Complex(m) => {
+                        inner(c, f, m);
+                    }
+                }
+            }
+        }
+    };
+    ($bench_name:ident, $sorted:expr, $func:ident::<$B1:literal $(, $B2:literal)+>) => {
+        pub fn $bench_name(c: &mut criterion::Criterion) {
+            use criterion::Criterion;
+            use num::traits::NumAssign;
+            use spam::{
+                csr_matrix::CsrMatrix,
+                dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
+                Matrix,
+            };
+            use std::{ffi::OsStr, fs};
+            use walkdir::WalkDir;
+
+            fn inner<T: Clone + NumAssign + Send + Sync>(
+                c: &mut Criterion,
+                f: &OsStr,
+                m: DokMatrix<T>,
+            ) {
+                let m: CsrMatrix<_, $sorted> = CsrMatrix::from(m);
+                c.bench_function(
+                    &format!(
+                        "bench {:?} {:?} ({}x{}, {} nonzero entries)",
+                        stringify!($func),
+                        f,
+                        m.rows(),
+                        m.cols(),
+                        m.nnz()
+                    ),
+                    |b| b.iter(|| m.$func::<$B1, $($B2)+>(&m)),
                 );
             }
 
