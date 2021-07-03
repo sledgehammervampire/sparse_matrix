@@ -30,7 +30,14 @@
                     rr
                     valgrind
                     cargo-expand
-                  ] ++ (with llvmPackages_latest; [ lld clang-unwrapped.lib libllvm ]);
+                    linuxPackages.perf
+                  ] ++ (
+                    with llvmPackages_latest; [
+                      clang-unwrapped.lib
+                      libllvm
+                      (wrapBintoolsWith { inherit bintools; })
+                    ]
+                  );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
               };

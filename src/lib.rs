@@ -42,10 +42,10 @@ pub struct AddPair<M>(pub M, pub M);
 #[derive(Clone, Debug)]
 pub struct MulPair<M>(pub M, pub M);
 
-fn is_increasing(s: &[usize]) -> bool {
+fn is_increasing<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {
-        if Some(i) > max {
+        if max.map_or(false, |k| k < i) {
             max = Some(i);
         } else {
             return false;
@@ -54,14 +54,14 @@ fn is_increasing(s: &[usize]) -> bool {
     true
 }
 
-fn all_distinct(s: &[usize]) -> bool {
-    s.iter().copied().collect::<HashSet<_>>().len() == s.len()
+fn all_distinct<T: std::hash::Hash + Eq>(s: &[T]) -> bool {
+    s.iter().collect::<HashSet<_>>().len() == s.len()
 }
 
-fn is_sorted(s: &[usize]) -> bool {
+fn is_sorted<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {
-        if Some(i) >= max {
+        if max.map_or(true, |k| k <= i) {
             max = Some(i);
         } else {
             return false;
