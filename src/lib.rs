@@ -45,7 +45,7 @@ pub struct MulPair<M>(pub M, pub M);
 fn is_increasing<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {
-        if max.map_or(false, |k| k < i) {
+        if max.map_or(true, |k| k < i) {
             max = Some(i);
         } else {
             return false;
