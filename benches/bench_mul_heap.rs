@@ -1,6 +1,6 @@
-use criterion::{criterion_group, criterion_main};
-use spam::make_bench_mul;
+use criterion::{criterion_main, Criterion};
+use spam::gen_bench;
 
-make_bench_mul!(bench_mul_heap, true, mul_heap);
-criterion_group!(benches, bench_mul_heap);
+gen_bench!(mul_heap, true);
+
 criterion_main!(benches);

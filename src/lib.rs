@@ -162,111 +162,82 @@ impl From<ComplexNewtype<f64>> for MKL_Complex16 {
 }
 
 #[macro_export]
-macro_rules! make_bench_mul {
-    ($bench_name:ident, $sorted:expr, $func:ident) => {
-        pub fn $bench_name(c: &mut criterion::Criterion) {
-            use criterion::Criterion;
-            use num::traits::NumAssign;
-            use spam::{
-                csr_matrix::CsrMatrix,
-                dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
-                Matrix,
-            };
-            use std::{ffi::OsStr, fs};
-            use walkdir::WalkDir;
-
-            fn inner<T: Clone + NumAssign + Send + Sync>(
-                c: &mut Criterion,
-                f: &OsStr,
-                m: DokMatrix<T>,
-            ) {
-                let m: CsrMatrix<_, $sorted> = CsrMatrix::from(m);
-                c.bench_function(
-                    &format!(
-                        "bench {:?} {:?} ({}x{}, {} nonzero entries)",
-                        stringify!($func),
-                        f,
-                        m.rows(),
-                        m.cols(),
-                        m.nnz()
-                    ),
-                    |b| b.iter(|| m.$func(&m)),
-                );
+macro_rules! gen_bench {
+    ($func:ident, $sorted:literal) => {
+        fn benches() {
+            let mut criterion = Criterion::default().configure_from_args();
+            for m in vec!["cont-300", "crystk02", "matrix-new_3", "nemeth20"] {
+                bench(&mut criterion, m);
             }
 
-            for entry in WalkDir::new("matrices")
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.path().extension() == Some("mtx".as_ref()))
-            {
-                let f = entry.path().file_name().unwrap();
-                match parse_matrix_market::<i64, f64>(&fs::read_to_string(entry.path()).unwrap())
-                    .unwrap()
-                {
+            fn bench(c: &mut Criterion, matrix_name: &str) {
+                use spam::{
+                    csr_matrix::CsrMatrix,
+                    dok_matrix::{parse_matrix_market, MatrixType},
+                };
+                use std::{fs, path::Path};
+
+                let path = format!("matrices/{}.mtx", matrix_name);
+                let path = Path::new(&path);
+                match parse_matrix_market::<i64, f64>(&fs::read_to_string(path).unwrap()).unwrap() {
                     MatrixType::Integer(m) => {
-                        // inner(c, f, m);
+                        let m = CsrMatrix::<_, $sorted>::from(m);
+                        c.bench_function(&format!("bench {} {:?}", stringify!($func), path), |b| {
+                            b.iter(|| {
+                                let _: CsrMatrix<_, $sorted> = m.$func(&m);
+                            });
+                        });
                     }
                     MatrixType::Real(m) => {
-                        inner(c, f, m);
+                        let m = CsrMatrix::<_, $sorted>::from(m);
+                        c.bench_function(&format!("bench {} {:?}", stringify!($func), path), |b| {
+                            b.iter(|| {
+                                let _: CsrMatrix<_, $sorted> = m.$func(&m);
+                            });
+                        });
                     }
                     MatrixType::Complex(m) => {
-                        inner(c, f, m);
+                        let m = CsrMatrix::<_, $sorted>::from(m);
+                        c.bench_function(&format!("bench {} {:?}", stringify!($func), path), |b| {
+                            b.iter(|| {
+                                let _: CsrMatrix<_, $sorted> = m.$func(&m);
+                            });
+                        });
                     }
                 }
             }
         }
     };
-    ($bench_name:ident, $sorted:expr, $func:ident::<$B1:literal $(, $B2:literal)+>) => {
-        pub fn $bench_name(c: &mut criterion::Criterion) {
-            use criterion::Criterion;
-            use num::traits::NumAssign;
-            use spam::{
-                csr_matrix::CsrMatrix,
-                dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
-                Matrix,
-            };
-            use std::{ffi::OsStr, fs};
-            use walkdir::WalkDir;
+}
 
-            fn inner<T: Clone + NumAssign + Send + Sync>(
-                c: &mut Criterion,
-                f: &OsStr,
-                m: DokMatrix<T>,
+#[macro_export]
+macro_rules! fuzz_mkl_spmm {
+    ($sorted:literal) => {
+        libfuzzer_sys::fuzz_target!(|bytes| {
+            use std::convert::TryFrom;
+            const MAX_SIZE: usize = 100;
+            let mut u = libfuzzer_sys::arbitrary::Unstructured::new(bytes);
+            if let (Ok(l), Ok(m), Ok(n)) = (
+                u.int_in_range(0..=MAX_SIZE),
+                u.int_in_range(0..=MAX_SIZE),
+                u.int_in_range(0..=MAX_SIZE),
             ) {
-                let m: CsrMatrix<_, $sorted> = CsrMatrix::from(m);
-                c.bench_function(
-                    &format!(
-                        "bench {:?} {:?} ({}x{}, {} nonzero entries)",
-                        stringify!($func),
-                        f,
-                        m.rows(),
-                        m.cols(),
-                        m.nnz()
-                    ),
-                    |b| b.iter(|| m.$func::<$B1, $($B2)+>(&m)),
-                );
-            }
-
-            for entry in WalkDir::new("matrices")
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.path().extension() == Some("mtx".as_ref()))
-            {
-                let f = entry.path().file_name().unwrap();
-                match parse_matrix_market::<i64, f64>(&fs::read_to_string(entry.path()).unwrap())
-                    .unwrap()
+                if let Ok(Ok(spam::MulPair(m1, m2))) = spam::arbitrary::arb_mul_pair_fixed_size::<
+                    f64,
+                    spam::csr_matrix::CsrMatrix<f64, $sorted>,
+                >(&mut u, l, m, n)
                 {
-                    MatrixType::Integer(m) => {
-                        // inner(c, f, m);
-                    }
-                    MatrixType::Real(m) => {
-                        inner(c, f, m);
-                    }
-                    MatrixType::Complex(m) => {
-                        inner(c, f, m);
-                    }
+                    let mut m1 = spam::csr_matrix::ffi::MklCsrMatrix::try_from(m1).unwrap();
+                    let m1 = spam::csr_matrix::ffi::RustMklSparseMatrix::try_from(&mut m1).unwrap();
+                    let m1 = spam::csr_matrix::ffi::CMklSparseMatrix::from(m1);
+                    let mut m2 = spam::csr_matrix::ffi::MklCsrMatrix::try_from(m2).unwrap();
+                    let m2 = spam::csr_matrix::ffi::RustMklSparseMatrix::try_from(&mut m2).unwrap();
+                    let m2 = spam::csr_matrix::ffi::CMklSparseMatrix::from(m2);
+                    let m3: spam::csr_matrix::CsrMatrix<_, false> =
+                        spam::csr_matrix::CsrMatrix::try_from((&m1 * &m2).unwrap()).unwrap();
+                    assert!(m3.invariants());
                 }
             }
-        }
+        });
     };
 }

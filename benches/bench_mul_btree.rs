@@ -1,6 +1,7 @@
-use criterion::{criterion_group, criterion_main};
-use spam::make_bench_mul;
 
-make_bench_mul!(bench_mul_btree, true, mul_btree);
-criterion_group!(benches, bench_mul_btree);
+use criterion::{criterion_main, Criterion};
+use spam::gen_bench;
+
+gen_bench!(mul_btree, true);
+
 criterion_main!(benches);

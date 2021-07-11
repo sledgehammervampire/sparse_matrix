@@ -28,7 +28,7 @@ test = false
 doc = false
 
 [[bin]]
-name = "mkl_spmm"
-path = "fuzz_targets/mkl_spmm.rs"
+name = "mkl_spmm_unsorted"
+path = "fuzz_targets/mkl_spmm_unsorted.rs"
 test = false
 doc = false

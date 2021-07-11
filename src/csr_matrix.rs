@@ -478,13 +478,19 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
         &self,
         rhs: &CsrMatrix<T, B>,
     ) -> CsrMatrix<T, B1> {
-        let (flop, offset) = self.rows_to_threads(rhs);
+        let (flop, flop_ps, offset) = self.rows_to_threads(rhs);
         crossbeam::scope(|s| {
             let mut handles = vec![];
             for (tlo, thi) in offset.iter().copied().tuple_windows() {
                 let flop = &flop;
+                let flop_ps = &flop_ps;
                 handles.push(s.spawn(move |_| {
-                    let (mut indices_part, mut vals_part, mut lens_part) = (vec![], vec![], vec![]);
+                    let tflop = flop_ps[thi] - flop_ps[tlo];
+                    let (mut indices_part, mut vals_part, mut lens_part) = (
+                        Vec::with_capacity(tflop),
+                        Vec::with_capacity(tflop),
+                        Vec::with_capacity(thi - tlo),
+                    );
                     let capacity = flop[tlo..thi]
                         .iter()
                         .copied()
@@ -495,8 +501,14 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                         capacity,
                         BuildHasherDefault::<FxHasher>::default(),
                     );
-                    for (a, b) in self.offsets[tlo..=thi].iter().copied().tuple_windows() {
-                        for (k, t) in self.indices[a..b].iter().copied().zip(&self.vals[a..b]) {
+                    for (row_start, row_end) in
+                        self.offsets[tlo..=thi].iter().copied().tuple_windows()
+                    {
+                        for (k, t) in self.indices[row_start..row_end]
+                            .iter()
+                            .copied()
+                            .zip(&self.vals[row_start..row_end])
+                        {
                             let (rcidx, rvals) = rhs.get_row_entries(k);
                             for (j, t1) in rcidx.iter().copied().zip(rvals) {
                                 *hm.entry(j).or_insert_with(T::zero) += t.clone() * t1.clone();
@@ -544,7 +556,10 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
         .unwrap()
     }
 
-    fn rows_to_threads<const B: bool>(&self, rhs: &CsrMatrix<T, B>) -> (Vec<usize>, Vec<usize>) {
+    fn rows_to_threads<const B: bool>(
+        &self,
+        rhs: &CsrMatrix<T, B>,
+    ) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
         let flop: Vec<usize> = self
             .offsets
             .par_iter()
@@ -557,13 +572,11 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
             })
             .collect();
         // TODO: make prefix sum parallel
-        let flop_ps: Vec<_> = flop
-            .iter()
-            .copied()
-            .scan(0, |sum, x| {
+        let flop_ps: Vec<_> = std::iter::once(0)
+            .chain(flop.iter().copied().scan(0, |sum, x| {
                 *sum += x;
                 Some(*sum)
-            })
+            }))
             .collect();
         let sum_flop = flop_ps.last().copied().unwrap();
         // TODO: not sure what the equivalent of omp_get_max_threads is
@@ -576,7 +589,7 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                 .map(|tid| flop_ps.partition_point(|&x| x < ave_flop * tid)),
         );
         offset.push(self.rows);
-        (flop, offset)
+        (flop, flop_ps, offset)
     }
 }
 
@@ -591,7 +604,9 @@ fn test_rows_to_threads() {
                 CsrMatrix::<_, false>::arb_fixed_size_matrix,
             ),
             |crate::MulPair(m1, m2)| {
-                let offsets = m1.rows_to_threads(&m2).1;
+                let (flop, flop_ps, offsets) = m1.rows_to_threads(&m2);
+                prop_assert!(flop.len() == m1.rows());
+                prop_assert!(flop_ps.len() == m1.rows() + 1);
                 prop_assert!(is_sorted(&offsets), "{:?}", offsets);
                 prop_assert!(
                     offsets.iter().copied().all(|c| c <= m1.rows()),

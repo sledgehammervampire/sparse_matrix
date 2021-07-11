@@ -3,12 +3,15 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
+    prusti-dev.url = "github:1000teslas/prusti-dev";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (
+  outputs = { self, nixpkgs, flake-utils, prusti-dev, rust-overlay }: flake-utils.lib.eachDefaultSystem (
     system:
       let
-        pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs { inherit system overlays; config.allowUnfree = true; };
       in
         {
           devShell =
@@ -16,13 +19,13 @@
               {
                 buildInputs =
                   [
+                    rust-bin.nightly.latest.default
                     cargo-edit
                     cargo-fuzz
                     cargo-binutils
                     cargo-flamegraph
                     hotspot
                     cargo-criterion
-                    openssl
                     pkg-config
                     mkl
                     coz

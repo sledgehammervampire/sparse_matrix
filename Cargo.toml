@@ -20,7 +20,7 @@ coz = "0.1.3"
 libc = "0.2.97"
 thiserror = "1.0.25"
 num_enum = "0.5.1"
-mkl-sys = { git = "https://github.com/Andlon/mkl-sys", version = "0.1.0", features = ["all", "openmp", "ilp64"] }
+mkl-sys = { git = "https://github.com/Andlon/mkl-sys", version = "0.1.0", features = ["inspector-executor", "openmp", "ilp64"] }
 rand = "0.8.4"
 crossbeam = "0.8.1"
 indexmap = "1.7.0"
