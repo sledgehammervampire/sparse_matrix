@@ -148,24 +148,27 @@ mod dok {
 }
 
 mod csr {
-    use std::{convert::TryFrom, num::Wrapping};
+    #[cfg(feature = "mkl")]
+    use {
+        crate::{
+            mkl::{CMklSparseMatrix, MklCsrMatrix, RustMklSparseMatrix},
+            ComplexNewtype,
+        },
+        std::convert::TryFrom,
+    };
+
+    use std::num::Wrapping;
 
     use itertools::iproduct;
     use proptest::{
-        arbitrary::any,
-        prop_assert, prop_assert_eq,
-        strategy::Strategy,
-        test_runner::{Config, TestRunner},
+        arbitrary::any, prop_assert, prop_assert_eq, strategy::Strategy, test_runner::TestRunner,
     };
 
     use crate::{
-        csr_matrix::{
-            ffi::{CMklSparseMatrix, MklCsrMatrix, RustMklSparseMatrix},
-            CsrMatrix,
-        },
+        csr_matrix::CsrMatrix,
         dok_matrix::DokMatrix,
         proptest::{arb_add_pair, arb_mul_pair},
-        AddPair, ComplexNewtype, Matrix, MulPair,
+        AddPair, Matrix, MulPair,
     };
 
     const MAX_SIZE: usize = 10;
@@ -334,9 +337,7 @@ mod csr {
 
     #[test]
     fn mul_hash1() {
-        let mut config = Config::default();
-        config.max_shrink_iters = 10_000;
-        let mut runner = TestRunner::new(config);
+        let mut runner = TestRunner::default();
         runner
             .run(
                 &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
@@ -416,6 +417,35 @@ mod csr {
                 &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
                     let m = CsrMatrix::from(m1.clone()).mul_heap(&CsrMatrix::from(m2.clone()));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn mul_esc() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(
+                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+                |MulPair(m1, m2)| {
+                    let m = <CsrMatrix<_, false> as From<_>>::from(m1.clone())
+                        .mul_esc::<false>(&CsrMatrix::from(m2.clone()));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m = <CsrMatrix<_, false> as From<_>>::from(m1.clone())
+                        .mul_esc::<true>(&CsrMatrix::from(m2.clone()));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m = <CsrMatrix<_, true> as From<_>>::from(m1.clone())
+                        .mul_esc::<false>(&CsrMatrix::from(m2.clone()));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m = <CsrMatrix<_, true> as From<_>>::from(m1.clone())
+                        .mul_esc::<true>(&CsrMatrix::from(m2.clone()));
                     prop_assert!(m.invariants(), "{:?}", m);
                     prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
                     Ok(())
@@ -513,11 +543,10 @@ mod csr {
             .unwrap();
     }
 
+    #[cfg(feature = "mkl")]
     #[test]
     fn mkl_spmm_d() {
-        let mut config = Config::default();
-        config.max_shrink_iters = 1_000_000;
-        let mut runner = TestRunner::new(config);
+        let mut runner = TestRunner::default();
         runner
             .run(
                 &arb_mul_pair(CsrMatrix::<f64, false>::arb_fixed_size_matrix),
@@ -536,10 +565,9 @@ mod csr {
             .unwrap();
     }
 
+    #[cfg(feature = "mkl")]
     #[test]
     fn mkl_spmm_z() {
-        let mut config = Config::default();
-        config.max_shrink_iters = 1_000_000;
         let mut runner = TestRunner::default();
         runner
             .run(

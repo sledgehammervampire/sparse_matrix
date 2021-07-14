@@ -43,6 +43,7 @@
                   );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
+                RUSTFLAGS = "-Z gcc-ld=lld -C target-cpu=native";
               };
         }
   );

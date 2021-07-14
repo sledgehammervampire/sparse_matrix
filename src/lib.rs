@@ -10,6 +10,8 @@ use thiserror::Error;
 pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
+#[cfg(feature = "mkl")]
+pub mod mkl;
 #[cfg(test)]
 mod proptest;
 #[cfg(test)]
@@ -207,37 +209,5 @@ macro_rules! gen_bench {
                 }
             }
         }
-    };
-}
-
-#[macro_export]
-macro_rules! fuzz_mkl_spmm {
-    ($sorted:literal) => {
-        libfuzzer_sys::fuzz_target!(|bytes| {
-            use std::convert::TryFrom;
-            const MAX_SIZE: usize = 100;
-            let mut u = libfuzzer_sys::arbitrary::Unstructured::new(bytes);
-            if let (Ok(l), Ok(m), Ok(n)) = (
-                u.int_in_range(0..=MAX_SIZE),
-                u.int_in_range(0..=MAX_SIZE),
-                u.int_in_range(0..=MAX_SIZE),
-            ) {
-                if let Ok(Ok(spam::MulPair(m1, m2))) = spam::arbitrary::arb_mul_pair_fixed_size::<
-                    f64,
-                    spam::csr_matrix::CsrMatrix<f64, $sorted>,
-                >(&mut u, l, m, n)
-                {
-                    let mut m1 = spam::csr_matrix::ffi::MklCsrMatrix::try_from(m1).unwrap();
-                    let m1 = spam::csr_matrix::ffi::RustMklSparseMatrix::try_from(&mut m1).unwrap();
-                    let m1 = spam::csr_matrix::ffi::CMklSparseMatrix::from(m1);
-                    let mut m2 = spam::csr_matrix::ffi::MklCsrMatrix::try_from(m2).unwrap();
-                    let m2 = spam::csr_matrix::ffi::RustMklSparseMatrix::try_from(&mut m2).unwrap();
-                    let m2 = spam::csr_matrix::ffi::CMklSparseMatrix::from(m2);
-                    let m3: spam::csr_matrix::CsrMatrix<_, false> =
-                        spam::csr_matrix::CsrMatrix::try_from((&m1 * &m2).unwrap()).unwrap();
-                    assert!(m3.invariants());
-                }
-            }
-        });
     };
 }

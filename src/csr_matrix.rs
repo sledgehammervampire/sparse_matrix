@@ -1,3 +1,4 @@
+use hashbrown::HashMap;
 use itertools::{iproduct, Itertools};
 use num::{traits::NumAssign, Num};
 use rand::prelude::SliceRandom;
@@ -5,7 +6,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fmt::Debug,
     hash::BuildHasherDefault,
     iter::repeat_with,
@@ -13,10 +14,12 @@ use std::{
     ops::{Add, Mul, Sub},
     vec,
 };
+use voracious_radix_sort::{RadixSort, Radixable};
 
 use crate::{all_distinct, dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix, MatrixError};
 
-pub mod ffi;
+#[cfg(feature = "mkl")]
+mod mkl;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T, const IS_SORTED: bool> {
@@ -590,6 +593,114 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
         );
         offset.push(self.rows);
         (flop, flop_ps, offset)
+    }
+}
+
+impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
+    pub fn mul_esc<const B: bool>(&self, rhs: &CsrMatrix<T, B>) -> CsrMatrix<T, true> {
+        #[derive(Clone, Copy)]
+        struct Entry<T> {
+            col: usize,
+            t: T,
+        }
+        impl<T> PartialEq for Entry<T> {
+            fn eq(&self, other: &Self) -> bool {
+                self.col == other.col
+            }
+        }
+        impl<T> PartialOrd for Entry<T> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                self.col.partial_cmp(&other.col)
+            }
+        }
+        impl<T: Copy + Send + Sync> Radixable<usize> for Entry<T> {
+            type Key = usize;
+
+            fn key(&self) -> Self::Key {
+                self.col
+            }
+        }
+
+        let (flop, flop_ps, offset) = self.rows_to_threads(rhs);
+        crossbeam::scope(|s| {
+            let mut handles = vec![];
+            for (tlo, thi) in offset.iter().copied().tuple_windows() {
+                let flop = &flop;
+                let flop_ps = &flop_ps;
+                let offset = &offset;
+                handles.push(s.spawn(move |_| {
+                    let tflop = flop_ps[thi] - flop_ps[tlo];
+                    let (mut indices_part, mut vals_part, mut lens_part) = (
+                        Vec::with_capacity(tflop),
+                        Vec::with_capacity(tflop),
+                        Vec::with_capacity(thi - tlo),
+                    );
+                    for (i, (row_start, row_end)) in
+                        (tlo..thi).zip(self.offsets[tlo..=thi].iter().copied().tuple_windows())
+                    {
+                        let mut entries = Vec::with_capacity(flop[i]);
+                        entries.extend(
+                            self.indices[row_start..row_end]
+                                .iter()
+                                .copied()
+                                .zip(&self.vals[row_start..row_end])
+                                .flat_map(|(k, &t)| {
+                                    let (rcidx, rvals) = rhs.get_row_entries(k);
+                                    rcidx
+                                        .iter()
+                                        .copied()
+                                        .zip(rvals.iter().map(move |&t1| t * t1))
+                                        .map(|(col, t)| Entry { col, t })
+                                }),
+                        );
+                        entries.voracious_mt_sort(offset.len() - 1);
+                        let entries =
+                            entries
+                                .into_iter()
+                                .fold(vec![], |mut v, Entry { col, t: t1 }| {
+                                    match v.last_mut() {
+                                        Some((c, t)) if *c == col => {
+                                            *t += t1;
+                                        }
+                                        _ => {
+                                            v.push((col, t1));
+                                        }
+                                    }
+                                    v
+                                });
+
+                        lens_part.push(entries.len());
+                        for (c, t) in entries {
+                            indices_part.push(c);
+                            vals_part.push(t);
+                        }
+                    }
+
+                    (indices_part, vals_part, lens_part)
+                }));
+            }
+            let (mut indices, mut vals, mut lens) = (vec![], vec![], vec![]);
+            for h in handles {
+                let (indices_part, vals_part, lens_part) = h.join().unwrap();
+                indices.extend(indices_part);
+                vals.extend(vals_part);
+                lens.extend(lens_part);
+            }
+            let offsets = std::iter::once(0)
+                .chain(lens.into_iter().scan(0, |sum, x| {
+                    *sum += x;
+                    Some(*sum)
+                }))
+                .collect();
+            CsrMatrix {
+                rows: self.rows,
+                cols: rhs.cols,
+                indices,
+                vals,
+                offsets,
+            }
+        })
+        .unwrap()
     }
 }
 
