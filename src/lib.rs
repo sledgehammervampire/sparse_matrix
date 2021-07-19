@@ -1,8 +1,12 @@
+#![deny(clippy::disallowed_method)]
+#[cfg(feature = "mkl")]
 use mkl_sys::MKL_Complex16;
 use num::{Complex, Num, One, Zero};
 use std::{
     borrow::Cow,
     collections::HashSet,
+    convert::{TryFrom, TryInto},
+    fmt::Debug,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign},
 };
 use thiserror::Error;
@@ -145,6 +149,7 @@ impl<T: Num + Clone> One for ComplexNewtype<T> {
     }
 }
 
+#[cfg(feature = "mkl")]
 impl From<MKL_Complex16> for ComplexNewtype<f64> {
     fn from(z: MKL_Complex16) -> Self {
         ComplexNewtype(Complex {
@@ -154,6 +159,7 @@ impl From<MKL_Complex16> for ComplexNewtype<f64> {
     }
 }
 
+#[cfg(feature = "mkl")]
 impl From<ComplexNewtype<f64>> for MKL_Complex16 {
     fn from(z: ComplexNewtype<f64>) -> Self {
         MKL_Complex16 {
@@ -163,51 +169,124 @@ impl From<ComplexNewtype<f64>> for MKL_Complex16 {
     }
 }
 
-#[macro_export]
-macro_rules! gen_bench {
-    ($func:ident, $sorted:literal) => {
-        fn benches() {
-            let mut criterion = Criterion::default().configure_from_args();
-            for m in vec!["cont-300", "crystk02", "matrix-new_3", "nemeth20"] {
-                bench(&mut criterion, m);
-            }
+// keys.len() == values.len()
+// keys.len() is a power of 2
+struct LpHashMap<V> {
+    keys: Box<[Option<u32>]>,
+    values: Box<[V]>,
+    capacity: usize,
+}
 
-            fn bench(c: &mut Criterion, matrix_name: &str) {
-                use spam::{
-                    csr_matrix::CsrMatrix,
-                    dok_matrix::{parse_matrix_market, MatrixType},
-                };
-                use std::{fs, path::Path};
-
-                let path = format!("matrices/{}.mtx", matrix_name);
-                let path = Path::new(&path);
-                match parse_matrix_market::<i64, f64>(&fs::read_to_string(path).unwrap()).unwrap() {
-                    MatrixType::Integer(m) => {
-                        let m = CsrMatrix::<_, $sorted>::from(m);
-                        c.bench_function(&format!("bench {} {:?}", stringify!($func), path), |b| {
-                            b.iter(|| {
-                                let _: CsrMatrix<_, $sorted> = m.$func(&m);
-                            });
-                        });
-                    }
-                    MatrixType::Real(m) => {
-                        let m = CsrMatrix::<_, $sorted>::from(m);
-                        c.bench_function(&format!("bench {} {:?}", stringify!($func), path), |b| {
-                            b.iter(|| {
-                                let _: CsrMatrix<_, $sorted> = m.$func(&m);
-                            });
-                        });
-                    }
-                    MatrixType::Complex(m) => {
-                        let m = CsrMatrix::<_, $sorted>::from(m);
-                        c.bench_function(&format!("bench {} {:?}", stringify!($func), path), |b| {
-                            b.iter(|| {
-                                let _: CsrMatrix<_, $sorted> = m.$func(&m);
-                            });
-                        });
-                    }
+impl<V: Num> LpHashMap<V> {
+    fn with_capacity(capacity: usize) -> Self {
+        let capacity = capacity.checked_next_power_of_two().unwrap();
+        Self {
+            keys: vec![None; capacity].into_boxed_slice(),
+            values: std::iter::repeat_with(V::zero)
+                .take(capacity)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            capacity,
+        }
+    }
+    fn shrink_to(&mut self, capacity: usize) {
+        self.capacity = capacity.checked_next_power_of_two().unwrap();
+    }
+    #[inline]
+    fn entry(&mut self, key: usize) -> Entry<'_, V> {
+        const HASH_SCAL: usize = 107;
+        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
+        loop {
+            if let Some(k) = self.keys[hash] {
+                if usize::try_from(k).unwrap() == key {
+                    break Entry::Occupied(&mut self.values[hash]);
+                } else {
+                    hash = (hash + 1) & (self.capacity - 1);
                 }
+            } else {
+                break Entry::Vacant(
+                    key.try_into().unwrap(),
+                    &mut self.keys[hash],
+                    &mut self.values[hash],
+                );
             }
         }
-    };
+    }
+    fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
+        self.keys[..self.capacity]
+            .iter_mut()
+            .zip(self.values[..self.capacity].iter_mut())
+            .filter_map(move |(i, t)| {
+                i.take()
+                    .map(|i| (i.try_into().unwrap(), std::mem::replace(t, V::zero())))
+            })
+    }
+}
+
+enum Entry<'a, V> {
+    Occupied(&'a mut V),
+    Vacant(u32, &'a mut Option<u32>, &'a mut V),
+}
+
+impl<'a, V> Entry<'a, V> {
+    #[inline]
+    fn and_modify<F: FnOnce(&mut V)>(mut self, f: F) -> Self {
+        if let Entry::Occupied(ref mut v) = self {
+            f(*v);
+        }
+        self
+    }
+    #[inline]
+    fn or_insert(self, default: V) -> &'a mut V {
+        match self {
+            Entry::Occupied(v) => v,
+            Entry::Vacant(k, slot, v) => {
+                *slot = Some(k);
+                *v = default;
+                v
+            }
+        }
+    }
+}
+
+// keys.len() is a power of 2
+struct LpHashSet {
+    elems: Box<[Option<u32>]>,
+    capacity: usize,
+}
+
+impl LpHashSet {
+    fn with_capacity(capacity: usize) -> Self {
+        let capacity = capacity.checked_next_power_of_two().unwrap();
+        Self {
+            elems: vec![None; capacity].into_boxed_slice(),
+            capacity,
+        }
+    }
+    // resize to a power of 2 no more than original capacity
+    fn shrink_to(&mut self, capacity: usize) {
+        self.capacity = capacity.checked_next_power_of_two().unwrap();
+    }
+    #[inline]
+    fn insert(&mut self, key: usize) {
+        const HASH_SCAL: usize = 107;
+        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
+        loop {
+            if let Some(k) = self.elems[hash] {
+                if usize::try_from(k).unwrap() == key {
+                    break;
+                } else {
+                    hash = (hash + 1) & (self.capacity - 1);
+                }
+            } else {
+                self.elems[hash] = Some(key.try_into().unwrap());
+                break;
+            }
+        }
+    }
+    fn drain(&mut self) -> impl Iterator<Item = u32> + '_ {
+        self.elems[..self.capacity]
+            .iter_mut()
+            .filter_map(|x| x.take())
+    }
 }

@@ -2,23 +2,27 @@
   description = "A very basic flake";
 
   inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
-    prusti-dev.url = "github:1000teslas/prusti-dev";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    flake-utils.url = github:numtide/flake-utils;
+    prusti-dev.url = github:1000teslas/prusti-dev;
+    rust-overlay.url = github:oxalica/rust-overlay;
   };
 
   outputs = { self, nixpkgs, flake-utils, prusti-dev, rust-overlay }: flake-utils.lib.eachDefaultSystem (
     system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [
+          (import rust-overlay)
+        ];
         pkgs = import nixpkgs { inherit system overlays; config.allowUnfree = true; };
       in
         {
+          packages = pkgs;
           devShell =
             with pkgs; mkShell
               {
                 buildInputs =
                   [
+                    bashInteractive
                     rust-bin.nightly.latest.default
                     cargo-edit
                     cargo-fuzz
@@ -34,6 +38,7 @@
                     valgrind
                     cargo-expand
                     linuxPackages.perf
+                    cargo-geiger
                   ] ++ (
                     with llvmPackages_latest; [
                       clang-unwrapped.lib
@@ -43,7 +48,6 @@
                   );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
-                RUSTFLAGS = "-Z gcc-ld=lld -C target-cpu=native";
               };
         }
   );
