@@ -7,7 +7,7 @@ use spam::{
 };
 
 fuzz_target!(|bytes| {
-    const MAX_SIZE: usize = 100;
+    const MAX_SIZE: usize = 50;
 
     let ambient_authority = ambient_authority();
     let mut rng = CapRng::default(ambient_authority);
