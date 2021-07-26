@@ -5,7 +5,6 @@ use num::{Complex, Num, One, Zero};
 use std::{
     borrow::Cow,
     collections::HashSet,
-    convert::{TryFrom, TryInto},
     fmt::Debug,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign},
 };
@@ -14,6 +13,9 @@ use thiserror::Error;
 pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
+mod hash_map;
+// mod hash_map2;
+mod hash_set;
 #[cfg(feature = "mkl")]
 pub mod mkl;
 #[cfg(test)]
@@ -166,127 +168,5 @@ impl From<ComplexNewtype<f64>> for MKL_Complex16 {
             real: z.0.re,
             imag: z.0.im,
         }
-    }
-}
-
-// keys.len() == values.len()
-// keys.len() is a power of 2
-struct LpHashMap<V> {
-    keys: Box<[Option<u32>]>,
-    values: Box<[V]>,
-    capacity: usize,
-}
-
-impl<V: Num> LpHashMap<V> {
-    fn with_capacity(capacity: usize) -> Self {
-        let capacity = capacity.checked_next_power_of_two().unwrap();
-        Self {
-            keys: vec![None; capacity].into_boxed_slice(),
-            values: std::iter::repeat_with(V::zero)
-                .take(capacity)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-            capacity,
-        }
-    }
-    fn shrink_to(&mut self, capacity: usize) {
-        self.capacity = capacity.checked_next_power_of_two().unwrap();
-    }
-    #[inline]
-    fn entry(&mut self, key: usize) -> Entry<'_, V> {
-        const HASH_SCAL: usize = 107;
-        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
-        loop {
-            if let Some(k) = self.keys[hash] {
-                if usize::try_from(k).unwrap() == key {
-                    break Entry::Occupied(&mut self.values[hash]);
-                } else {
-                    hash = (hash + 1) & (self.capacity - 1);
-                }
-            } else {
-                break Entry::Vacant(
-                    key.try_into().unwrap(),
-                    &mut self.keys[hash],
-                    &mut self.values[hash],
-                );
-            }
-        }
-    }
-    fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
-        self.keys[..self.capacity]
-            .iter_mut()
-            .zip(self.values[..self.capacity].iter_mut())
-            .filter_map(move |(i, t)| {
-                i.take()
-                    .map(|i| (i.try_into().unwrap(), std::mem::replace(t, V::zero())))
-            })
-    }
-}
-
-enum Entry<'a, V> {
-    Occupied(&'a mut V),
-    Vacant(u32, &'a mut Option<u32>, &'a mut V),
-}
-
-impl<'a, V> Entry<'a, V> {
-    #[inline]
-    fn and_modify<F: FnOnce(&mut V)>(mut self, f: F) -> Self {
-        if let Entry::Occupied(ref mut v) = self {
-            f(*v);
-        }
-        self
-    }
-    #[inline]
-    fn or_insert(self, default: V) -> &'a mut V {
-        match self {
-            Entry::Occupied(v) => v,
-            Entry::Vacant(k, slot, v) => {
-                *slot = Some(k);
-                *v = default;
-                v
-            }
-        }
-    }
-}
-
-// keys.len() is a power of 2
-struct LpHashSet {
-    elems: Box<[Option<u32>]>,
-    capacity: usize,
-}
-
-impl LpHashSet {
-    fn with_capacity(capacity: usize) -> Self {
-        let capacity = capacity.checked_next_power_of_two().unwrap();
-        Self {
-            elems: vec![None; capacity].into_boxed_slice(),
-            capacity,
-        }
-    }
-    // resize to a power of 2 no more than original capacity
-    fn shrink_to(&mut self, capacity: usize) {
-        self.capacity = capacity.checked_next_power_of_two().unwrap();
-    }
-    #[inline]
-    fn insert(&mut self, key: usize) {
-        const HASH_SCAL: usize = 107;
-        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
-        loop {
-            if let Some(k) = self.elems[hash] {
-                if usize::try_from(k).unwrap() == key {
-                    break;
-                } else {
-                    hash = (hash + 1) & (self.capacity - 1);
-                }
-            } else {
-                self.elems[hash] = Some(key.try_into().unwrap());
-                break;
-            }
-        }
-    }
-    fn drain(&mut self) -> impl Iterator<Item = u32> + '_ {
-        self.elems[..self.capacity]
-            .iter_mut()
-            .filter_map(|x| x.take())
     }
 }

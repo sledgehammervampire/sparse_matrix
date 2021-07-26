@@ -21,31 +21,34 @@
             with pkgs; mkShell
               {
                 buildInputs =
-                  [
-                    bashInteractive
-                    rust-bin.nightly.latest.default
-                    cargo-edit
-                    cargo-fuzz
-                    cargo-binutils
-                    cargo-flamegraph
-                    hotspot
-                    cargo-criterion
-                    pkg-config
-                    mkl
-                    coz
-                    rust-bindgen
-                    rr
-                    valgrind
-                    cargo-expand
-                    linuxPackages.perf
-                    cargo-geiger
-                  ] ++ (
-                    with llvmPackages_latest; [
-                      clang-unwrapped.lib
-                      libllvm
-                      (wrapBintoolsWith { inherit bintools; })
-                    ]
-                  );
+                  let
+                    myRust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" "miri" ]; });
+                  in
+                    [
+                      bashInteractive
+                      myRust
+                      cargo-edit
+                      cargo-fuzz
+                      cargo-binutils
+                      cargo-flamegraph
+                      hotspot
+                      cargo-criterion
+                      pkg-config
+                      mkl
+                      coz
+                      rust-bindgen
+                      rr
+                      valgrind
+                      cargo-expand
+                      linuxPackages.perf
+                      cargo-geiger
+                    ] ++ (
+                      with llvmPackages_latest; [
+                        clang-unwrapped.lib
+                        libllvm
+                        (wrapBintoolsWith { inherit bintools; })
+                      ]
+                    );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
               };

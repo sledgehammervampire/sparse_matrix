@@ -435,19 +435,36 @@ mod csr {
                     let ambient_authority = ambient_authority();
                     let mut rng = CapRng::default(ambient_authority);
 
-                    let m = CsrMatrix::from_dok(m1.clone(), &mut rng)
+                    let m: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng)
                         .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
                     prop_assert!(m.invariants(), "{:?}", m);
                     prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = CsrMatrix::from_dok(m1.clone(), &mut rng)
+                    let m: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng)
                         .mul_hash2(&CsrMatrix::from(m2.clone()));
                     prop_assert!(m.invariants(), "{:?}", m);
                     prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = CsrMatrix::from(m1.clone())
+                    let m: CsrMatrix<_, false> = CsrMatrix::from(m1.clone())
                         .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
                     prop_assert!(m.invariants(), "{:?}", m);
                     prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = CsrMatrix::from(m1.clone()).mul_hash2(&CsrMatrix::from(m2.clone()));
+                    let m: CsrMatrix<_, false> =
+                        CsrMatrix::from(m1.clone()).mul_hash2(&CsrMatrix::from(m2.clone()));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m: CsrMatrix<_, true> = CsrMatrix::from_dok(m1.clone(), &mut rng)
+                        .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m: CsrMatrix<_, true> = CsrMatrix::from_dok(m1.clone(), &mut rng)
+                        .mul_hash2(&CsrMatrix::from(m2.clone()));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m: CsrMatrix<_, true> = CsrMatrix::from(m1.clone())
+                        .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
+                    prop_assert!(m.invariants(), "{:?}", m);
+                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
+                    let m: CsrMatrix<_, true> =
+                        CsrMatrix::from(m1.clone()).mul_hash2(&CsrMatrix::from(m2.clone()));
                     prop_assert!(m.invariants(), "{:?}", m);
                     prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
                     Ok(())

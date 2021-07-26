@@ -8,7 +8,6 @@ use rustc_hash::FxHasher;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    convert::TryInto,
     fmt::Debug,
     hash::BuildHasherDefault,
     iter::repeat_with,
@@ -17,10 +16,7 @@ use std::{
     vec,
 };
 
-use crate::{
-    all_distinct, dok_matrix::DokMatrix, is_increasing, is_sorted, LpHashMap, LpHashSet, Matrix,
-    MatrixError,
-};
+use crate::{all_distinct, dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix, MatrixError};
 
 #[cfg(feature = "mkl")]
 mod mkl;
@@ -401,7 +397,7 @@ impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T, true> {
     }
 }
 
-impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
+impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
     pub fn mul_hash<const B: bool, const B1: bool>(
         &self,
         rhs: &CsrMatrix<T, B>,
@@ -425,15 +421,15 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                 self.indices[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
-                    .for_each(|(&k, t)| {
+                    .for_each(|(&k, &t)| {
                         let (rcidx, rvals) = rhs.get_row_entries(k);
                         rcidx
                             .iter()
-                            .zip(rvals.iter().map(move |t1| t.clone() * t1.clone()))
+                            .zip(rvals.iter().map(move |&t1| t * t1))
                             .for_each(|(&j, t1)| {
                                 row.entry(j)
                                     .and_modify(|t| {
-                                        *t += t1.clone();
+                                        *t += t1;
                                     })
                                     .or_insert(t1);
                             });
@@ -476,11 +472,11 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                 self.indices[a..b]
                     .iter()
                     .zip(self.vals[a..b].iter())
-                    .for_each(|(&k, t)| {
+                    .for_each(|(&k, &t)| {
                         let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, t1)| {
+                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, &t1)| {
                             let entry = row.entry(j).or_insert_with(T::zero);
-                            *entry += t.clone() * t1.clone();
+                            *entry += t * t1;
                         });
                     });
 
@@ -539,7 +535,10 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
     }
 
     // based off pengdada/mtspgemmlib
-    pub fn mul_hash2<const B: bool>(&self, rhs: &CsrMatrix<T, B>) -> CsrMatrix<T, false> {
+    pub fn mul_hash2<const B: bool, const SORTED_OUTPUT: bool>(
+        &self,
+        rhs: &CsrMatrix<T, B>,
+    ) -> CsrMatrix<T, SORTED_OUTPUT> {
         let (mut row_nz, _, rows_offset) = self.rows_to_threads(rhs);
         // mutate row_nz or alloc new vec for new row_nz?
         crossbeam::scope(|s| {
@@ -549,7 +548,7 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                 rest = s2;
                 s.spawn(move |_| {
                     let capacity = s1.iter().copied().max().unwrap_or(0);
-                    let mut hs = LpHashSet::with_capacity(capacity);
+                    let mut hs = crate::hash_set::HashSet::with_capacity(capacity);
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
                         .copied()
@@ -578,10 +577,10 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
             }))
             .collect();
         let nnz = *offsets.last().unwrap();
-        // let (mut indices, mut vals) = (vec![None; nnz], vec![None; nnz]);
         let (mut indices, mut vals) = (Vec::with_capacity(nnz), Vec::with_capacity(nnz));
         crossbeam::scope(|s| {
-            // let (mut indices_rest, mut vals_rest) = (&mut indices[..], &mut vals[..]);
+            // SAFETY: indices_rest is the allocated capacity of indices
+            // SAFETY: vals_rest is the allocated capacity of vals
             let (mut indices_rest, mut vals_rest) = unsafe {
                 (
                     slice::from_raw_parts_mut(
@@ -602,7 +601,7 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                 vals_rest = s2;
                 s.spawn(move |_| {
                     let capacity = trow_nz.iter().copied().max().unwrap_or(0);
-                    let mut hm = LpHashMap::with_capacity(capacity);
+                    let mut hm = crate::hash_map::HashMap::with_capacity(capacity);
                     let mut curr = 0;
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
@@ -614,42 +613,51 @@ impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_
                             continue;
                         }
                         hm.shrink_to(*row_nz);
-                        for (k, t) in self.indices[row_start..row_end]
+                        for (k, &t) in self.indices[row_start..row_end]
                             .iter()
                             .copied()
                             .zip(&self.vals[row_start..row_end])
                         {
                             let (rcidx, rvals) = rhs.get_row_entries(k);
-                            for (j, t1) in rcidx
-                                .iter()
-                                .copied()
-                                .zip(rvals.iter().map(|t1| t.clone() * t1.clone()))
+                            for (j, t1) in rcidx.iter().copied().zip(rvals.iter().map(|&t1| t * t1))
                             {
                                 hm.entry(j)
                                     .and_modify(|t| {
-                                        *t += t1.clone();
+                                        *t += t1;
                                     })
                                     .or_insert(t1);
                             }
                         }
-                        for (c, t) in hm.drain() {
-                            // tindices[curr] = Some(c);
-                            // tvals[curr] = Some(t);
-                            unsafe {
-                                tindices[curr].as_mut_ptr().write(c.try_into().unwrap());
-                                tvals[curr].as_mut_ptr().write(t);
+                        if SORTED_OUTPUT {
+                            let mut row: Vec<_> = hm.drain().collect();
+                            row.sort_unstable_by_key(|(c, _)| *c);
+                            for (c, t) in row {
+                                // SAFETY: tindices of each thread are disjoint slices of indices
+                                // SAFETY: tvals of each thread are disjoint slices of vals
+                                unsafe {
+                                    tindices[curr].as_mut_ptr().write(c);
+                                    tvals[curr].as_mut_ptr().write(t);
+                                }
+                                curr += 1;
                             }
-                            curr += 1;
+                        } else {
+                            for (c, t) in hm.drain() {
+                                // SAFETY: tindices of each thread are disjoint slices of indices
+                                // SAFETY: tvals of each thread are disjoint slices of vals
+                                unsafe {
+                                    tindices[curr].as_mut_ptr().write(c);
+                                    tvals[curr].as_mut_ptr().write(t);
+                                }
+                                curr += 1;
+                            }
                         }
                     }
                 });
             }
         })
         .unwrap();
-        // let (indices, vals) = (
-        //     indices.into_iter().map(Option::unwrap).collect(),
-        //     vals.into_iter().map(Option::unwrap).collect(),
-        // );
+        // SAFETY: rows_offsets induces a partition of the allocated capacity of indices and vals
+        // given by (rows_start, rows_end)
         unsafe {
             indices.set_len(indices.capacity());
             vals.set_len(vals.capacity());
@@ -814,7 +822,7 @@ impl<T: Num, const IS_SORTED: bool> Sub for CsrMatrix<T, IS_SORTED> {
     }
 }
 
-impl<T: NumAssign + Clone + Send + Sync, const IS_SORTED: bool> Mul for &CsrMatrix<T, IS_SORTED> {
+impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> Mul for &CsrMatrix<T, IS_SORTED> {
     type Output = CsrMatrix<T, IS_SORTED>;
 
     fn mul(self, rhs: Self) -> Self::Output {
