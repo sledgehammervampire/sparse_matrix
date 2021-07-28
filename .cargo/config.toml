@@ -1,2 +1,2 @@
 [build]
-rustflags = ["-Z", "gcc-ld=lld", "-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=native"]

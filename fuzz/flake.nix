@@ -14,17 +14,6 @@
           (import rust-overlay)
         ];
         pkgs = import nixpkgs { inherit system overlays; config.allowUnfree = true; };
-        xargo = with pkgs; rustPlatform.buildRustPackage rec {
-          pname = "xargo";
-          version = "v0.3.20";
-          src = fetchFromGitHub {
-            owner = "japaric";
-            repo = pname;
-            rev = version;
-            sha256 = "sha256-xJpT/sw5fEdorsoH4hyRU5NAql1nFBzm1kvi5c+3yus=";
-          };
-          cargoSha256 = "sha256-h0W2b/V7xcxk0SjES9oswPq8FCI5iJCifVji5WcTDf8=";
-        };
       in
         {
           packages = pkgs;
@@ -37,7 +26,7 @@
                   in
                     [
                       bashInteractive
-                      rust-bin.stable.latest.default
+                      myRust
                       cargo-edit
                       cargo-fuzz
                       cargo-binutils

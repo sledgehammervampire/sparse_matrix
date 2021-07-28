@@ -25,7 +25,7 @@ fn bench_mul(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
             MatrixType::Integer(m) => {
                 let m = CsrMatrix::from(m);
                 criterion.bench_function(
-                    &format!("bench {} {:?}", stringify!(mul_hash2), entry.file_name()),
+                    &format!("bench {} {:?}", stringify!(mul_hash), entry.file_name()),
                     |b| {
                         b.iter(|| {
                             let _: CsrMatrix<_, false> = m.mul_hash2(&m);
@@ -36,7 +36,7 @@ fn bench_mul(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
             MatrixType::Real(m) => {
                 let m = CsrMatrix::from(m);
                 criterion.bench_function(
-                    &format!("bench {} {:?}", stringify!(mul_hash2), entry.file_name()),
+                    &format!("bench {} {:?}", stringify!(mul_hash), entry.file_name()),
                     |b| {
                         b.iter(|| {
                             let _: CsrMatrix<_, false> = m.mul_hash2(&m);
@@ -47,7 +47,7 @@ fn bench_mul(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
             MatrixType::Complex(m) => {
                 let m = CsrMatrix::from(m);
                 criterion.bench_function(
-                    &format!("bench {} {:?}", stringify!(mul_hash2), entry.file_name()),
+                    &format!("bench {} {:?}", stringify!(mul_hash), entry.file_name()),
                     |b| {
                         b.iter(|| {
                             let _: CsrMatrix<_, false> = m.mul_hash2(&m);
