@@ -1,6 +1,5 @@
 use cap_rand::prelude::*;
 use core::slice;
-use hashbrown::HashMap;
 use itertools::{iproduct, Itertools};
 use num::{traits::NumAssign, Num};
 use rayon::prelude::*;
@@ -8,6 +7,7 @@ use rustc_hash::FxHasher;
 use std::{
     borrow::Cow,
     collections::BTreeMap,
+    convert::{TryFrom, TryInto},
     fmt::Debug,
     hash::BuildHasherDefault,
     iter::repeat_with,
@@ -221,7 +221,7 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
                     })
                     .unzip()
             } else {
-                let mut row: HashMap<_, _> = self.indices[a..b]
+                let mut row: hashbrown::HashMap<_, _> = self.indices[a..b]
                     .iter()
                     .copied()
                     .zip(self.vals.splice(a..b, repeat_with(T::zero).take(b - a)))
@@ -413,7 +413,7 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                     .iter()
                     .map(|&k| rhs.get_row_entries(k).0.len())
                     .sum();
-                let mut row = HashMap::with_capacity_and_hasher(
+                let mut row = hashbrown::HashMap::with_capacity_and_hasher(
                     capacity,
                     BuildHasherDefault::<FxHasher>::default(),
                 );
@@ -547,8 +547,15 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                 let (s1, s2) = rest.split_at_mut(thi - tlo);
                 rest = s2;
                 s.spawn(move |_| {
-                    let capacity = s1.iter().copied().max().unwrap_or(0);
-                    let mut hs = crate::hash_set::HashSet::with_capacity(capacity);
+                    // maximum of per row capacity
+                    let capacity = s1
+                        .iter()
+                        .copied()
+                        .max()
+                        .unwrap_or(0)
+                        .checked_next_power_of_two()
+                        .expect("next power of 2 doesn't fit a usize");
+                    let mut hs = HashSet::with_capacity(capacity);
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
                         .copied()
@@ -558,7 +565,14 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                         if *row_nz == 0 {
                             continue;
                         }
-                        hs.shrink_to(*row_nz);
+                        // the number of distinct keys inserted is likely much
+                        // less than row_nz without multiplying by 2, so we
+                        // don't multiply by 2 here, which would make the
+                        // benchmarks slower
+                        let capacity = row_nz
+                            .checked_next_power_of_two()
+                            .expect("next power of 2 doesn't fit a usize");
+                        hs.shrink_to(capacity);
                         for &k in &self.indices[row_start..row_end] {
                             for &j in rhs.get_row_entries(k).0 {
                                 hs.insert(j);
@@ -600,8 +614,17 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                 let (tvals, s2) = vals_rest.split_at_mut(offsets[thi] - offsets[tlo]);
                 vals_rest = s2;
                 s.spawn(move |_| {
-                    let capacity = trow_nz.iter().copied().max().unwrap_or(0);
-                    let mut hm = crate::hash_map::HashMap::with_capacity(capacity);
+                    // maximum of per row capacity
+                    let capacity = trow_nz
+                        .iter()
+                        .copied()
+                        .max()
+                        .unwrap_or(0)
+                        .checked_next_power_of_two()
+                        .expect("next power of 2 doesn't fit a usize")
+                        .checked_shl(1)
+                        .expect("next power of 2 doesn't fit a usize");
+                    let mut hm = HashMap::with_capacity(capacity);
                     let mut curr = 0;
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
@@ -612,7 +635,15 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                         if *row_nz == 0 {
                             continue;
                         }
-                        hm.shrink_to(*row_nz);
+                        // row_nz could be close to row_nz.next_power_of_two(),
+                        // so we multiply by 2 to lower the load factor. this
+                        // makes benchmarks faster
+                        let capacity = row_nz
+                            .checked_next_power_of_two()
+                            .expect("next power of 2 doesn't fit a usize")
+                            .checked_shl(1)
+                            .expect("next power of 2 doesn't fit a usize");
+                        hm.shrink_to(capacity);
                         for (k, &t) in self.indices[row_start..row_end]
                             .iter()
                             .copied()
@@ -895,5 +926,122 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
 
     pub fn arb_matrix() -> impl proptest::strategy::Strategy<Value = Self> {
         crate::proptest::arb_matrix::<T, _, _>(Self::arb_fixed_size_matrix)
+    }
+}
+
+struct HashMap<V> {
+    slots: Box<[Option<(u32, V)>]>,
+    capacity: usize,
+}
+
+impl<V> HashMap<V> {
+    fn with_capacity(capacity: usize) -> Self {
+        debug_assert!(capacity.is_power_of_two());
+        Self {
+            slots: std::iter::repeat_with(|| None)
+                .take(capacity)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            capacity,
+        }
+    }
+    fn shrink_to(&mut self, capacity: usize) {
+        debug_assert!(capacity.is_power_of_two());
+        debug_assert!(capacity <= self.slots.len());
+        self.capacity = capacity;
+    }
+    #[inline]
+    fn entry(&mut self, key: usize) -> Entry<'_, V> {
+        const HASH_SCAL: usize = 107;
+        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
+        loop {
+            // We redo the borrow in the success cases to avoid a borrowck weakness
+            // TODO: rewrite without reborrow when polonius arrives
+            match &self.slots[hash] {
+                Some((k, _)) if usize::try_from(*k).unwrap() == key => {
+                    break Entry::Occupied(&mut self.slots[hash].as_mut().unwrap().1);
+                }
+                Some(_) => {
+                    hash = (hash + 1) & (self.capacity - 1);
+                }
+                None => {
+                    break Entry::Vacant(key.try_into().unwrap(), &mut self.slots[hash]);
+                }
+            }
+        }
+    }
+    fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
+        self.slots[..self.capacity]
+            .iter_mut()
+            .filter_map(|e| e.take().map(|(i, v)| (i.try_into().unwrap(), v)))
+    }
+}
+
+enum Entry<'a, V> {
+    Occupied(&'a mut V),
+    Vacant(u32, &'a mut Option<(u32, V)>),
+}
+
+impl<'a, V> Entry<'a, V> {
+    #[inline]
+    fn and_modify<F: FnOnce(&mut V)>(mut self, f: F) -> Self {
+        if let Entry::Occupied(ref mut v) = self {
+            f(*v);
+        }
+        self
+    }
+    #[inline]
+    fn or_insert(self, default: V) -> &'a mut V {
+        match self {
+            Entry::Occupied(v) => v,
+            Entry::Vacant(k, slot) => {
+                *slot = Some((k, default));
+                slot.as_mut().map(|(_, v)| v).unwrap()
+            }
+        }
+    }
+}
+
+struct HashSet {
+    slots: Box<[Option<u32>]>,
+    capacity: usize,
+}
+
+impl HashSet {
+    fn with_capacity(capacity: usize) -> Self {
+        let capacity = capacity.checked_next_power_of_two().unwrap();
+        Self {
+            slots: vec![None; capacity].into_boxed_slice(),
+            capacity,
+        }
+    }
+    // resize to a power of 2 no more than original capacity
+    fn shrink_to(&mut self, capacity: usize) {
+        // see with_capacity
+        let new_capacity = capacity.checked_next_power_of_two().unwrap();
+        assert!(new_capacity <= self.slots.len());
+        self.capacity = new_capacity;
+    }
+    #[inline]
+    fn insert(&mut self, key: usize) {
+        const HASH_SCAL: usize = 107;
+        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
+        loop {
+            if let Some(k) = self.slots[hash] {
+                if usize::try_from(k).unwrap() == key {
+                    break;
+                } else {
+                    hash = (hash + 1) & (self.capacity - 1);
+                }
+            } else {
+                self.slots[hash] = Some(key.try_into().unwrap());
+                break;
+            }
+        }
+    }
+    fn drain(&mut self) -> impl Iterator<Item = u32> + '_ {
+        self.slots[..self.capacity]
+            .iter_mut()
+            .filter_map(|x| x.take())
     }
 }

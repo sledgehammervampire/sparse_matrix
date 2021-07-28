@@ -13,9 +13,7 @@ use thiserror::Error;
 pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
-mod hash_map;
 // mod hash_map2;
-mod hash_set;
 #[cfg(feature = "mkl")]
 pub mod mkl;
 #[cfg(test)]
