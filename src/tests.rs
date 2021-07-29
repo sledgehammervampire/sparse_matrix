@@ -152,13 +152,7 @@ mod dok {
 
 mod csr {
     #[cfg(feature = "mkl")]
-    use {
-        crate::{
-            mkl::{CMklSparseMatrix, MklCsrMatrix, RustMklSparseMatrix},
-            ComplexNewtype,
-        },
-        std::convert::TryFrom,
-    };
+    use {crate::ComplexNewtype, std::convert::TryFrom};
 
     use std::num::Wrapping;
 
@@ -574,17 +568,17 @@ mod csr {
     #[cfg(feature = "mkl")]
     #[test]
     fn mkl_spmm_d() {
+        use crate::csr_matrix::mkl::{MklCsrMatrix, RustMklSparseMatrix};
+
         let mut runner = TestRunner::default();
         runner
             .run(
                 &arb_mul_pair(CsrMatrix::<f64, false>::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
                     let mut m3 = MklCsrMatrix::try_from(m1.clone()).unwrap();
-                    let m3 =
-                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m3).unwrap());
+                    let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
                     let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
-                    let m4 =
-                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m4).unwrap());
+                    let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
                     let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
                     prop_assert!(m5.invariants(), "{:?}", m5);
                     Ok(())
@@ -596,17 +590,17 @@ mod csr {
     #[cfg(feature = "mkl")]
     #[test]
     fn mkl_spmm_z() {
+        use crate::csr_matrix::mkl::{MklCsrMatrix, RustMklSparseMatrix};
+
         let mut runner = TestRunner::default();
         runner
             .run(
                 &arb_mul_pair(CsrMatrix::<ComplexNewtype<f64>, false>::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
                     let mut m3 = MklCsrMatrix::try_from(m1.clone()).unwrap();
-                    let m3 =
-                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m3).unwrap());
+                    let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
                     let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
-                    let m4 =
-                        CMklSparseMatrix::from(RustMklSparseMatrix::try_from(&mut m4).unwrap());
+                    let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
                     let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
                     prop_assert!(m5.invariants(), "{:?}", m5);
                     Ok(())

@@ -3,9 +3,11 @@ use criterion::Criterion;
 use std::{convert::TryFrom, io::Read};
 
 use spam::{
-    csr_matrix::CsrMatrix,
+    csr_matrix::{
+        mkl::{MklCsrMatrix, RustMklSparseMatrix},
+        CsrMatrix,
+    },
     dok_matrix::{parse_matrix_market, MatrixType},
-    mkl::{CMklSparseMatrix, MklCsrMatrix, RustMklSparseMatrix},
 };
 
 fn main() -> anyhow::Result<()> {
@@ -28,7 +30,6 @@ fn bench_mul(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
                 let m = CsrMatrix::from(m);
                 let mut m = MklCsrMatrix::try_from(m).unwrap();
                 let m = RustMklSparseMatrix::try_from(&mut m).unwrap();
-                let m = CMklSparseMatrix::from(m);
                 criterion.bench_function(&format!("bench mkl_spmm {:?}", entry.file_name()), |b| {
                     b.iter(|| {
                         let _ = &m * &m;
@@ -39,7 +40,6 @@ fn bench_mul(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
                 let m = CsrMatrix::from(m);
                 let mut m = MklCsrMatrix::try_from(m).unwrap();
                 let m = RustMklSparseMatrix::try_from(&mut m).unwrap();
-                let m = CMklSparseMatrix::from(m);
                 criterion.bench_function(&format!("bench mkl_spmm {:?}", entry.file_name()), |b| {
                     b.iter(|| {
                         let _ = &m * &m;

@@ -1,4 +1,4 @@
-use crate::{ComplexNewtype, Matrix, MatrixError};
+use crate::{ComplexNewtype, Matrix, NewMatrixError};
 use itertools::Itertools;
 use nom::{Finish, IResult};
 use num::Num;
@@ -19,9 +19,9 @@ pub struct DokMatrix<T> {
 }
 
 impl<T: Num> DokMatrix<T> {
-    fn new(rows: usize, cols: usize) -> Result<Self, MatrixError> {
+    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError> {
         if rows == 0 || cols == 0 {
-            return Err(MatrixError::HasZeroDimension);
+            return Err(NewMatrixError::HasZeroDimension);
         }
         Ok(DokMatrix {
             rows,
@@ -30,13 +30,13 @@ impl<T: Num> DokMatrix<T> {
         })
     }
 
-    fn new_square(n: usize) -> Result<Self, MatrixError> {
+    fn new_square(n: usize) -> Result<Self, NewMatrixError> {
         Self::new(n, n)
     }
 
-    fn identity(n: usize) -> Result<Self, MatrixError> {
+    fn identity(n: usize) -> Result<Self, NewMatrixError> {
         if n == 0 {
-            return Err(MatrixError::HasZeroDimension);
+            return Err(NewMatrixError::HasZeroDimension);
         }
         Ok(DokMatrix {
             rows: n,
@@ -92,11 +92,11 @@ impl<T: Num> DokMatrix<T> {
 }
 
 impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
-    fn new(rows: usize, cols: usize) -> Result<Self, MatrixError> {
+    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError> {
         Self::new(rows, cols)
     }
 
-    fn new_square(n: usize) -> Result<Self, MatrixError> {
+    fn new_square(n: usize) -> Result<Self, NewMatrixError> {
         Self::new_square(n)
     }
 
@@ -122,7 +122,7 @@ impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
         self.set_element(pos, t)
     }
 
-    fn identity(n: usize) -> Result<Self, MatrixError> {
+    fn identity(n: usize) -> Result<Self, NewMatrixError> {
         Self::identity(n)
     }
 
@@ -219,7 +219,7 @@ pub enum FromMatrixMarketError {
     #[error("parsing error")]
     Nom(#[from] nom::error::Error<String>),
     #[error("{0:?}")]
-    MatrixError(#[from] MatrixError),
+    MatrixError(#[from] NewMatrixError),
 }
 
 pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
@@ -462,7 +462,7 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
             })?;
     if rows == 0 || cols == 0 {
         return Err(FromMatrixMarketError::MatrixError(
-            MatrixError::HasZeroDimension,
+            NewMatrixError::HasZeroDimension,
         ));
     }
     match entries {

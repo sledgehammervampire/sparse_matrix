@@ -14,23 +14,21 @@ pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
 // mod hash_map2;
-#[cfg(feature = "mkl")]
-pub mod mkl;
 #[cfg(test)]
 mod proptest;
 #[cfg(test)]
 mod tests;
 
 #[derive(Error, Debug)]
-pub enum MatrixError {
+pub enum NewMatrixError {
     #[error("number of rows is 0 or number of columns is 0")]
     HasZeroDimension,
 }
 
 pub trait Matrix<T: ToOwned>: Sized {
-    fn new(rows: usize, cols: usize) -> Result<Self, MatrixError>;
-    fn new_square(n: usize) -> Result<Self, MatrixError>;
-    fn identity(n: usize) -> Result<Self, MatrixError>;
+    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError>;
+    fn new_square(n: usize) -> Result<Self, NewMatrixError>;
+    fn identity(n: usize) -> Result<Self, NewMatrixError>;
     fn rows(&self) -> usize;
     fn cols(&self) -> usize;
     // the number of nonzero entries in the matrix
