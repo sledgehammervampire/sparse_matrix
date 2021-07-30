@@ -1,5 +1,6 @@
-use cap_std::{ambient_authority, fs::Dir};
+use cap_std::fs::Dir;
 use criterion::Criterion;
+use open_ambient::open_ambient_dir;
 use std::{convert::TryFrom, io::Read};
 
 use spam::{
@@ -11,14 +12,13 @@ use spam::{
 };
 
 fn main() -> anyhow::Result<()> {
-    let ambient_authority = ambient_authority();
-    let dir = Dir::open_ambient_dir("matrices", ambient_authority)?;
+    let dir = open_ambient_dir!("matrices")?;
     bench_mul(dir)?;
 
     Ok(())
 }
 
-fn bench_mul(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
+fn bench_mul(dir: Dir) -> anyhow::Result<()> {
     let mut criterion = Criterion::default().configure_from_args();
     for entry in dir.entries()? {
         let entry = entry?;
