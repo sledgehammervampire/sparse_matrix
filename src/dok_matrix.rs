@@ -1,10 +1,10 @@
-use crate::{ComplexNewtype, Matrix, NewMatrixError};
+use crate::{csr_matrix::CsrMatrix, ComplexNewtype, IndexError, Matrix};
 use itertools::Itertools;
 use nom::{Finish, IResult};
 use num::Num;
 use std::{
-    borrow::Cow,
     collections::BTreeMap,
+    num::NonZeroUsize,
     ops::{Add, Mul},
     str::FromStr,
 };
@@ -13,35 +13,71 @@ use thiserror::Error;
 // a dumb matrix implementation to test against
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct DokMatrix<T> {
-    rows: usize,
-    cols: usize,
+    rows: NonZeroUsize,
+    cols: NonZeroUsize,
     pub(crate) entries: BTreeMap<(usize, usize), T>,
 }
 
 impl<T: Num> DokMatrix<T> {
-    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError> {
-        if rows == 0 || cols == 0 {
-            return Err(NewMatrixError::HasZeroDimension);
-        }
-        Ok(DokMatrix {
+    // output entries with (row, col) lexicographically ordered
+    pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
+        self.entries.iter().map(|(&p, t)| (p, t))
+    }
+
+    pub fn invariants(&self) -> bool {
+        self.iter()
+            .all(|((r, c), t)| r < self.rows.get() && c < self.cols.get() && !t.is_zero())
+    }
+}
+
+impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
+    fn new((rows, cols): (NonZeroUsize, NonZeroUsize)) -> Self {
+        DokMatrix {
             rows,
             cols,
             entries: BTreeMap::new(),
-        })
-    }
-
-    fn new_square(n: usize) -> Result<Self, NewMatrixError> {
-        Self::new(n, n)
-    }
-
-    fn identity(n: usize) -> Result<Self, NewMatrixError> {
-        if n == 0 {
-            return Err(NewMatrixError::HasZeroDimension);
         }
-        Ok(DokMatrix {
+    }
+
+    fn new_square(n: NonZeroUsize) -> Self {
+        Self::new((n, n))
+    }
+
+    fn identity(n: NonZeroUsize) -> Self {
+        DokMatrix {
             rows: n,
             cols: n,
-            entries: (0..n).map(|i| ((i, i), T::one())).collect(),
+            entries: (0..n.get()).map(|i| ((i, i), T::one())).collect(),
+        }
+    }
+
+    fn rows(&self) -> NonZeroUsize {
+        self.rows
+    }
+
+    fn cols(&self) -> NonZeroUsize {
+        self.cols
+    }
+
+    fn nnz(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn get_element(&self, (i, j): (usize, usize)) -> Result<Option<&T>, IndexError> {
+        if !(i < self.rows.get() && j < self.cols.get()) {
+            return Err(IndexError);
+        }
+        Ok(self.entries.get(&(i, j)))
+    }
+
+    fn set_element(&mut self, (i, j): (usize, usize), t: T) -> Result<Option<T>, IndexError> {
+        if !(i < self.rows.get() && j < self.cols.get()) {
+            return Err(IndexError);
+        }
+        Ok(if t.is_zero() {
+            self.entries.remove(&(i, j))
+        } else {
+            self.entries.insert((i, j), t)
         })
     }
 
@@ -55,79 +91,6 @@ impl<T: Num> DokMatrix<T> {
                 .map(|((i, j), t)| ((j, i), t))
                 .collect(),
         }
-    }
-
-    fn rows(&self) -> usize {
-        self.rows
-    }
-
-    fn cols(&self) -> usize {
-        self.cols
-    }
-
-    fn nnz(&self) -> usize {
-        self.entries.len()
-    }
-
-    // output entries with (row, col) lexicographically ordered
-    pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
-        self.entries.iter().map(|(&p, t)| (p, t))
-    }
-
-    pub fn invariants(&self) -> bool {
-        self.rows > 0
-            && self.cols > 0
-            && self
-                .iter()
-                .all(|((r, c), t)| r < self.rows && c < self.cols && !t.is_zero())
-    }
-
-    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T> {
-        if t.is_zero() {
-            self.entries.remove(&pos)
-        } else {
-            self.entries.insert(pos, t)
-        }
-    }
-}
-
-impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
-    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError> {
-        Self::new(rows, cols)
-    }
-
-    fn new_square(n: usize) -> Result<Self, NewMatrixError> {
-        Self::new_square(n)
-    }
-
-    fn rows(&self) -> usize {
-        self.rows()
-    }
-
-    fn cols(&self) -> usize {
-        self.cols()
-    }
-
-    fn nnz(&self) -> usize {
-        self.nnz()
-    }
-
-    fn get_element(&self, pos: (usize, usize)) -> Cow<T> {
-        self.entries
-            .get(&pos)
-            .map_or(Cow::Owned(T::zero()), Cow::Borrowed)
-    }
-
-    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T> {
-        self.set_element(pos, t)
-    }
-
-    fn identity(n: usize) -> Result<Self, NewMatrixError> {
-        Self::identity(n)
-    }
-
-    fn transpose(self) -> Self {
-        self.transpose()
     }
 }
 
@@ -166,12 +129,20 @@ impl<T: Num + Clone> Mul for &DokMatrix<T> {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
         let mut entries = BTreeMap::new();
-        for i in 0..self.rows {
-            for j in 0..rhs.cols {
+        for i in 0..self.rows.get() {
+            for j in 0..rhs.cols.get() {
                 let mut t = T::zero();
-                for k in 0..self.cols {
-                    t = t + self.get_element((i, k)).into_owned()
-                        * rhs.get_element((k, j)).into_owned();
+                for k in 0..self.cols.get() {
+                    t = t + self
+                        .get_element((i, k))
+                        .unwrap()
+                        .cloned()
+                        .unwrap_or_else(T::zero)
+                        * rhs
+                            .get_element((k, j))
+                            .unwrap()
+                            .cloned()
+                            .unwrap_or_else(T::zero);
                 }
                 if !t.is_zero() {
                     entries.insert((i, j), t);
@@ -187,22 +158,14 @@ impl<T: Num + Clone> Mul for &DokMatrix<T> {
     }
 }
 
-impl<T: Num + Clone, const IS_SORTED: bool> From<crate::csr_matrix::CsrMatrix<T, IS_SORTED>>
-    for DokMatrix<T>
-{
-    fn from(old: crate::csr_matrix::CsrMatrix<T, IS_SORTED>) -> Self {
+impl<T: Num, const IS_SORTED: bool> From<CsrMatrix<T, IS_SORTED>> for DokMatrix<T> {
+    fn from(old: CsrMatrix<T, IS_SORTED>) -> Self {
         DokMatrix {
             rows: old.rows(),
             cols: old.cols(),
             entries: old
-                .iter()
-                .filter_map(|(i, t)| {
-                    if t.is_zero() {
-                        None
-                    } else {
-                        Some((i, t.clone()))
-                    }
-                })
+                .into_iter()
+                .filter_map(|(i, t)| if t.is_zero() { None } else { Some((i, t)) })
                 .collect(),
         }
     }
@@ -218,8 +181,8 @@ pub enum MatrixType<I, R> {
 pub enum FromMatrixMarketError {
     #[error("parsing error")]
     Nom(#[from] nom::error::Error<String>),
-    #[error("{0:?}")]
-    MatrixError(#[from] NewMatrixError),
+    #[error("number of rows or columns is 0")]
+    HasZeroDimension,
 }
 
 pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
@@ -460,11 +423,10 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                 input: input.to_string(),
                 code,
             })?;
-    if rows == 0 || cols == 0 {
-        return Err(FromMatrixMarketError::MatrixError(
-            NewMatrixError::HasZeroDimension,
-        ));
-    }
+    let (rows, cols) = (
+        NonZeroUsize::new(rows).ok_or(FromMatrixMarketError::HasZeroDimension)?,
+        NonZeroUsize::new(cols).ok_or(FromMatrixMarketError::HasZeroDimension)?,
+    );
     match entries {
         EntryType::Integer(entries) => Ok(MatrixType::Integer(DokMatrix {
             rows,

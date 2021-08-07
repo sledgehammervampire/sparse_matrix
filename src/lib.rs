@@ -3,12 +3,10 @@
 use mkl_sys::MKL_Complex16;
 use num::{Complex, Num, One, Zero};
 use std::{
-    borrow::Cow,
-    collections::HashSet,
     fmt::Debug,
+    num::NonZeroUsize,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign},
 };
-use thiserror::Error;
 
 pub mod arbitrary;
 pub mod csr_matrix;
@@ -19,22 +17,19 @@ mod proptest;
 #[cfg(test)]
 mod tests;
 
-#[derive(Error, Debug)]
-pub enum NewMatrixError {
-    #[error("number of rows is 0 or number of columns is 0")]
-    HasZeroDimension,
-}
+#[derive(Debug, PartialEq, Eq)]
+pub struct IndexError;
 
-pub trait Matrix<T: ToOwned>: Sized {
-    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError>;
-    fn new_square(n: usize) -> Result<Self, NewMatrixError>;
-    fn identity(n: usize) -> Result<Self, NewMatrixError>;
-    fn rows(&self) -> usize;
-    fn cols(&self) -> usize;
-    // the number of nonzero entries in the matrix
+pub trait Matrix<T>: Sized {
+    fn new(size: (NonZeroUsize, NonZeroUsize)) -> Self;
+    fn new_square(n: NonZeroUsize) -> Self;
+    fn identity(n: NonZeroUsize) -> Self;
+    fn rows(&self) -> NonZeroUsize;
+    fn cols(&self) -> NonZeroUsize;
+    // the number of explicit entries in the matrix
     fn nnz(&self) -> usize;
-    fn get_element(&self, pos: (usize, usize)) -> Cow<T>;
-    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T>;
+    fn get_element(&self, pos: (usize, usize)) -> Result<Option<&T>, IndexError>;
+    fn set_element(&mut self, pos: (usize, usize), t: T) -> Result<Option<T>, IndexError>;
     fn transpose(self) -> Self;
 }
 
@@ -46,6 +41,7 @@ pub struct AddPair<M>(pub M, pub M);
 #[derive(Clone, Debug)]
 pub struct MulPair<M>(pub M, pub M);
 
+#[cfg(test)]
 fn is_increasing<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {
@@ -58,10 +54,12 @@ fn is_increasing<T: Ord>(s: &[T]) -> bool {
     true
 }
 
+#[cfg(test)]
 fn all_distinct<T: std::hash::Hash + Eq>(s: &[T]) -> bool {
-    s.iter().collect::<HashSet<_>>().len() == s.len()
+    s.iter().collect::<std::collections::HashSet<_>>().len() == s.len()
 }
 
+#[cfg(test)]
 fn is_sorted<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {

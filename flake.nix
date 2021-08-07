@@ -14,30 +14,31 @@
           (import rust-overlay)
         ];
         pkgs = import nixpkgs { inherit system overlays; config.allowUnfree = true; };
-        xargo = with pkgs; rustPlatform.buildRustPackage rec {
+        xargo = pkgs.rustPlatform.buildRustPackage rec {
           pname = "xargo";
-          version = "v0.3.20";
-          src = fetchFromGitHub {
+          version = "v0.3.23";
+          src = pkgs.fetchFromGitHub {
             owner = "japaric";
             repo = pname;
-            rev = version;
-            sha256 = "sha256-xJpT/sw5fEdorsoH4hyRU5NAql1nFBzm1kvi5c+3yus=";
+            rev = "b64ed6614fd7578de3b7893538d63f4f23e3522f";
+            sha256 = "sha256-qMKcL64UcF+VfiqMfhAAoKdqs8xi/x6bFRo3OZJqiqw=";
           };
-          cargoSha256 = "sha256-h0W2b/V7xcxk0SjES9oswPq8FCI5iJCifVji5WcTDf8=";
+          cargoSha256 = "sha256-IdIGZbem8FEjj7XQ6218/MvEPE0qXoN5ZOZiv5JakIY=";
+          # FIXME
+          doCheck = false;
         };
       in
         {
-          packages = pkgs;
           devShell =
             with pkgs; mkShell
               {
                 buildInputs =
                   let
-                    myRust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" "miri" ]; });
+                    myRust = rust-bin.nightly."2021-08-03".default.override { extensions = [ "rust-src" "miri" ]; };
                   in
                     [
                       bashInteractive
-                      rust-bin.stable.latest.default
+                      myRust
                       cargo-edit
                       cargo-fuzz
                       cargo-binutils
@@ -53,6 +54,7 @@
                       cargo-expand
                       linuxPackages.perf
                       cargo-geiger
+                      xargo
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib
@@ -62,6 +64,8 @@
                     );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
+                XARGO_CHECK = "${xargo}/bin/xargo-check";
+                MIRI_SYSROOT = "/home/rdp/.cache/miri/HOST";
               };
         }
   );

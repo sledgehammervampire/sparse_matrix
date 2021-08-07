@@ -5,28 +5,26 @@ use num::{traits::NumAssign, Num};
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use std::{
-    borrow::Cow,
     collections::BTreeMap,
-    convert::TryFrom,
+    convert::TryInto,
     fmt::Debug,
     hash::BuildHasherDefault,
     iter::repeat_with,
     mem::{self, MaybeUninit},
+    num::NonZeroUsize,
     ops::{Add, Mul, Sub},
     vec,
 };
 
-use crate::{
-    all_distinct, dok_matrix::DokMatrix, is_increasing, is_sorted, Matrix, NewMatrixError,
-};
+use crate::{dok_matrix::DokMatrix, IndexError, Matrix};
 
 #[cfg(feature = "mkl")]
 pub mod mkl;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CsrMatrix<T, const IS_SORTED: bool> {
-    rows: usize,
-    cols: usize,
+    rows: NonZeroUsize,
+    cols: NonZeroUsize,
     vals: Vec<T>,
     indices: Vec<usize>,
     offsets: Vec<usize>,
@@ -46,144 +44,80 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
         (&self.indices[j..k], &self.vals[j..k])
     }
 
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = ((usize, usize), &T)> {
-        (0..self.rows).flat_map(move |r| {
-            let (cidx, vals) = self.get_row_entries(r);
-            cidx.iter()
-                .copied()
-                .zip(vals.iter())
-                .map(move |(c, t)| ((r, c), t))
-        })
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = ((usize, usize), T)> {
+        let offsets = self.offsets;
+        self.indices
+            .into_iter()
+            .zip(self.vals.into_iter())
+            .enumerate()
+            .map(move |(i, (c, t))| ((offsets.partition_point(|x| *x <= i) - 1, c), t))
     }
 
-    pub fn invariants(&self) -> bool {
+    #[cfg(test)]
+    fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
+        self.offsets
+            .iter()
+            .copied()
+            .tuple_windows()
+            .enumerate()
+            .flat_map(move |(r, (rlo, rhi))| {
+                let (indices, vals) = (&self.indices[rlo..rhi], &self.vals[rlo..rhi]);
+                indices.iter().map(move |c| (r, *c)).zip(vals.iter())
+            })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn invariants(&self) -> bool {
         self.invariant1()
             && self.invariant2()
             && self.invariant3()
             && self.invariant4()
             && self.invariant5()
             && self.invariant6()
+            && self.invariant7()
     }
 
+    #[cfg(test)]
     fn invariant1(&self) -> bool {
         self.indices.len() == self.vals.len()
     }
 
+    #[cfg(test)]
     fn invariant2(&self) -> bool {
-        self.offsets.len() == self.rows + 1 && self.offsets[self.rows] == self.indices.len()
+        self.offsets.len() == self.rows.get().checked_add(1).unwrap()
     }
 
+    #[cfg(test)]
     fn invariant3(&self) -> bool {
-        is_sorted(&self.offsets)
+        crate::is_sorted(&self.offsets)
     }
 
+    #[cfg(test)]
     fn invariant4(&self) -> bool {
-        self.rows > 0 && self.cols > 0
+        self.offsets[self.rows.get()] == self.indices.len()
     }
 
+    #[cfg(test)]
     fn invariant5(&self) -> bool {
-        self.indices.iter().all(|c| (0..self.cols).contains(c))
+        self.indices
+            .iter()
+            .all(|c| (0..self.cols.get()).contains(c))
     }
 
+    #[cfg(test)]
     fn invariant6(&self) -> bool {
         self.offsets.iter().copied().tuple_windows().all(|(a, b)| {
             if IS_SORTED {
-                is_increasing(&self.indices[a..b])
+                crate::is_increasing(&self.indices[a..b])
             } else {
-                all_distinct(&self.indices[a..b])
+                crate::all_distinct(&self.indices[a..b])
             }
         })
     }
 
-    fn rows(&self) -> usize {
-        self.rows
-    }
-
-    fn cols(&self) -> usize {
-        self.cols
-    }
-
-    fn nnz(&self) -> usize {
-        self.indices.len()
-    }
-
-    fn set_element(&mut self, (i, j): (usize, usize), t: T) -> Option<T> {
-        assert!(i < self.rows && j < self.cols, "position not in bounds");
-
-        if IS_SORTED {
-            match self.get_row_entries(i).0.binary_search(&j) {
-                Ok(pos) => {
-                    let pos = self.offsets[i] + pos;
-                    Some(mem::replace(&mut self.vals[pos], t))
-                }
-                Err(pos) => {
-                    let pos = self.offsets[i] + pos;
-                    self.vals.insert(pos, t);
-                    self.indices.insert(pos, j);
-                    for m in i + 1..=self.rows {
-                        self.offsets[m] += 1;
-                    }
-                    None
-                }
-            }
-        } else {
-            match self.get_row_entries(i).0.iter().position(|k| *k == j) {
-                Some(pos) => {
-                    let pos = self.offsets[i] + pos;
-                    Some(mem::replace(&mut self.vals[pos], t))
-                }
-                None => {
-                    let pos = self.offsets[i + 1];
-                    self.vals.insert(pos, t);
-                    self.indices.insert(pos, j);
-                    for m in i + 1..=self.rows {
-                        self.offsets[m] += 1;
-                    }
-                    None
-                }
-            }
-        }
-    }
-
-    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError> {
-        if rows == 0 || cols == 0 {
-            return Err(NewMatrixError::HasZeroDimension);
-        }
-        let capacity = 1000.min(rows * cols / 5);
-        Ok(CsrMatrix {
-            rows,
-            cols,
-            vals: Vec::with_capacity(capacity),
-            indices: Vec::with_capacity(capacity),
-            offsets: vec![0; rows + 1],
-        })
-    }
-
-    fn new_square(n: usize) -> Result<Self, NewMatrixError> {
-        Self::new(n, n)
-    }
-
-    fn transpose(mut self) -> Self {
-        let mut new = CsrMatrix::new(self.cols, self.rows).unwrap();
-        for (j, i) in iproduct!(0..self.cols, 0..self.rows) {
-            if let Some(t) = self.set_element((i, j), T::zero()) {
-                new.set_element((j, i), t);
-            }
-        }
-        new
-    }
-
-    fn identity(n: usize) -> Result<Self, NewMatrixError> {
-        if n == 0 {
-            return Err(NewMatrixError::HasZeroDimension);
-        }
-        Ok(CsrMatrix {
-            rows: n,
-            cols: n,
-            vals: repeat_with(T::one).take(n).collect(),
-            indices: (0..n).collect(),
-            offsets: (0..=n).collect(),
-        })
+    #[cfg(test)]
+    fn invariant7(&self) -> bool {
+        self.offsets[0] == 0
     }
 
     fn apply_elementwise<F>(mut self, mut rhs: Self, f: &F) -> Self
@@ -254,54 +188,123 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
     }
 }
 
-impl<T: Num + Clone, const IS_SORTED: bool> Matrix<T> for CsrMatrix<T, IS_SORTED> {
-    fn get_element(&self, (i, j): (usize, usize)) -> Cow<T> {
-        assert!(
-            (..self.rows).contains(&i) && (..self.cols).contains(&j),
-            "values are not in bounds"
-        );
+#[test]
+fn test_into_iter() {
+    use proptest::prop_assert_eq;
 
-        let (cidx, vals) = self.get_row_entries(i);
-        if IS_SORTED {
-            cidx.binary_search(&j)
-                .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
-        } else {
-            cidx.iter()
-                .position(|k| *k == j)
-                .map_or(Cow::Owned(T::zero()), |k| Cow::Borrowed(&vals[k]))
+    let mut config = proptest::test_runner::Config::default();
+    config.max_shrink_iters = 10000;
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    runner
+        .run(&CsrMatrix::<i8, false>::arb_matrix(), |m| {
+            prop_assert_eq!(
+                m.iter().map(|e| (e.0, *e.1)).collect::<Vec<_>>(),
+                m.into_iter().collect::<Vec<_>>()
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+impl<T: Num, const IS_SORTED: bool> Matrix<T> for CsrMatrix<T, IS_SORTED> {
+    fn new((rows, cols): (NonZeroUsize, NonZeroUsize)) -> Self {
+        let capacity = 1000.min(rows.get() * cols.get() / 5);
+        CsrMatrix {
+            rows,
+            cols,
+            vals: Vec::with_capacity(capacity),
+            indices: Vec::with_capacity(capacity),
+            offsets: vec![0; rows.get() + 1],
         }
     }
 
-    fn new(rows: usize, cols: usize) -> Result<Self, NewMatrixError> {
-        Self::new(rows, cols)
+    fn new_square(n: NonZeroUsize) -> Self {
+        Self::new((n, n))
     }
 
-    fn new_square(n: usize) -> Result<Self, NewMatrixError> {
-        Self::new_square(n)
+    fn identity(n: NonZeroUsize) -> Self {
+        CsrMatrix {
+            rows: n,
+            cols: n,
+            vals: repeat_with(T::one).take(n.get()).collect(),
+            indices: (0..n.get()).collect(),
+            offsets: (0..=n.get()).collect(),
+        }
     }
 
-    fn rows(&self) -> usize {
-        self.rows()
+    fn rows(&self) -> NonZeroUsize {
+        self.rows
     }
 
-    fn cols(&self) -> usize {
-        self.cols()
+    fn cols(&self) -> NonZeroUsize {
+        self.cols
     }
 
     fn nnz(&self) -> usize {
-        self.nnz()
+        self.indices.len()
     }
 
-    fn set_element(&mut self, pos: (usize, usize), t: T) -> Option<T> {
-        self.set_element(pos, t)
+    fn get_element(&self, (i, j): (usize, usize)) -> Result<Option<&T>, IndexError> {
+        if !(i < self.rows.get() && j < self.cols.get()) {
+            return Err(IndexError);
+        }
+
+        let (cidx, vals) = self.get_row_entries(i);
+        Ok(if IS_SORTED {
+            cidx.binary_search(&j).ok().map(|k| &vals[k])
+        } else {
+            cidx.iter().position(|k| *k == j).map(|k| &vals[k])
+        })
     }
 
-    fn identity(n: usize) -> Result<Self, NewMatrixError> {
-        Self::identity(n)
+    fn set_element(&mut self, (i, j): (usize, usize), t: T) -> Result<Option<T>, IndexError> {
+        if !(i < self.rows.get() && j < self.cols.get()) {
+            return Err(IndexError);
+        }
+
+        if IS_SORTED {
+            match self.get_row_entries(i).0.binary_search(&j) {
+                Ok(pos) => {
+                    let pos = self.offsets[i] + pos;
+                    Ok(Some(mem::replace(&mut self.vals[pos], t)))
+                }
+                Err(pos) => {
+                    let pos = self.offsets[i] + pos;
+                    self.vals.insert(pos, t);
+                    self.indices.insert(pos, j);
+                    for m in i + 1..=self.rows.get() {
+                        self.offsets[m] += 1;
+                    }
+                    Ok(None)
+                }
+            }
+        } else {
+            match self.get_row_entries(i).0.iter().position(|k| *k == j) {
+                Some(pos) => {
+                    let pos = self.offsets[i] + pos;
+                    Ok(Some(mem::replace(&mut self.vals[pos], t)))
+                }
+                None => {
+                    let pos = self.offsets[i + 1];
+                    self.vals.insert(pos, t);
+                    self.indices.insert(pos, j);
+                    for m in i + 1..=self.rows.get() {
+                        self.offsets[m] += 1;
+                    }
+                    Ok(None)
+                }
+            }
+        }
     }
 
-    fn transpose(self) -> Self {
-        self.transpose()
+    fn transpose(mut self) -> Self {
+        let mut new = CsrMatrix::new((self.cols, self.rows));
+        for (j, i) in iproduct!(0..self.cols.get(), 0..self.rows.get()) {
+            if let Some(t) = self.set_element((i, j), T::zero()).unwrap() {
+                new.set_element((j, i), t).unwrap();
+            }
+        }
+        new
     }
 }
 
@@ -315,7 +318,7 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T, true> {
             vals.push(t);
             indices.push(j);
         }
-        offsets.extend(std::iter::repeat(vals.len()).take(rows + 1 - offsets.len()));
+        offsets.extend(std::iter::repeat(vals.len()).take(rows.get() + 1 - offsets.len()));
         CsrMatrix {
             rows,
             cols,
@@ -338,7 +341,7 @@ impl<T: Num + Clone> CsrMatrix<T, false> {
             vals.push(t);
             indices.push(j);
         }
-        offsets.extend(std::iter::repeat(vals.len()).take(rows + 1 - offsets.len()));
+        offsets.extend(std::iter::repeat(vals.len()).take(rows.get() + 1 - offsets.len()));
         CsrMatrix {
             rows,
             cols,
@@ -532,7 +535,7 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                 .into_par_iter()
                 .map(|tid| ps_row_nz.partition_point(|&x| x < average_intprod * tid)),
         );
-        rows_offset.push(self.rows);
+        rows_offset.push(self.rows.get());
         (row_nz, ps_row_nz, rows_offset)
     }
 
@@ -678,7 +681,7 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                                 // SAFETY: tindices of each thread are disjoint slices of indices
                                 // SAFETY: tvals of each thread are disjoint slices of vals
                                 unsafe {
-                                    tindices[curr].as_mut_ptr().write(c);
+                                    tindices[curr].as_mut_ptr().write(c.try_into().unwrap());
                                     tvals[curr].as_mut_ptr().write(t);
                                 }
                                 curr += 1;
@@ -825,11 +828,11 @@ fn test_rows_to_threads() {
             ),
             |crate::MulPair(m1, m2)| {
                 let (flop, flop_ps, offsets) = m1.rows_to_threads(&m2);
-                prop_assert!(flop.len() == m1.rows());
-                prop_assert!(flop_ps.len() == m1.rows() + 1);
-                prop_assert!(is_sorted(&offsets), "{:?}", offsets);
+                prop_assert!(flop.len() == m1.rows().get());
+                prop_assert!(flop_ps.len() == m1.rows().get() + 1);
+                prop_assert!(crate::is_sorted(&offsets), "{:?}", offsets);
                 prop_assert!(
-                    offsets.iter().copied().all(|c| c <= m1.rows()),
+                    offsets.iter().copied().all(|c| c <= m1.rows().get()),
                     "{:?}",
                     offsets
                 );
@@ -866,30 +869,32 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> Mul for &CsrMatri
 #[cfg(test)]
 impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, true> {
     pub(crate) fn arb_fixed_size_matrix(
-        rows: usize,
-        cols: usize,
+        rows: NonZeroUsize,
+        cols: NonZeroUsize,
     ) -> impl proptest::strategy::Strategy<Value = Self> {
         use proptest::prelude::*;
-        repeat_with(|| proptest::sample::subsequence((0..cols).collect::<Vec<_>>(), 0..=cols))
-            .take(rows)
-            .collect::<Vec<_>>()
-            .prop_flat_map(move |cidx| {
-                let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
-                for mut rcidx in cidx {
-                    ridx.push(ridx.last().unwrap() + rcidx.len());
-                    cidx_flattened.append(&mut rcidx);
-                }
-                repeat_with(|| T::arbitrary())
-                    .take(cidx_flattened.len())
-                    .collect::<Vec<_>>()
-                    .prop_map(move |vals| CsrMatrix {
-                        rows,
-                        cols,
-                        vals,
-                        indices: cidx_flattened.clone(),
-                        offsets: ridx.clone(),
-                    })
-            })
+        repeat_with(|| {
+            proptest::sample::subsequence((0..cols.get()).collect::<Vec<_>>(), 0..=cols.get())
+        })
+        .take(rows.get())
+        .collect::<Vec<_>>()
+        .prop_flat_map(move |cidx| {
+            let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
+            for mut rcidx in cidx {
+                ridx.push(ridx.last().unwrap() + rcidx.len());
+                cidx_flattened.append(&mut rcidx);
+            }
+            repeat_with(|| T::arbitrary())
+                .take(cidx_flattened.len())
+                .collect::<Vec<_>>()
+                .prop_map(move |vals| CsrMatrix {
+                    rows,
+                    cols,
+                    vals,
+                    indices: cidx_flattened.clone(),
+                    offsets: ridx.clone(),
+                })
+        })
     }
 
     pub fn arb_matrix() -> impl proptest::strategy::Strategy<Value = Self> {
@@ -900,12 +905,12 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, true> {
 #[cfg(test)]
 impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
     pub(crate) fn arb_fixed_size_matrix(
-        rows: usize,
-        cols: usize,
+        rows: NonZeroUsize,
+        cols: NonZeroUsize,
     ) -> impl proptest::strategy::Strategy<Value = Self> {
         use proptest::prelude::*;
-        repeat_with(|| proptest::collection::hash_set(0..cols, 0..=cols))
-            .take(rows)
+        repeat_with(|| proptest::collection::hash_set(0..cols.get(), 0..=cols.get()))
+            .take(rows.get())
             .collect::<Vec<_>>()
             .prop_flat_map(move |cidx| {
                 let (mut cidx_flattened, mut ridx) = (vec![], vec![0]);
@@ -936,12 +941,7 @@ struct HashMap<K, V> {
     capacity: usize,
 }
 
-impl<K, V> HashMap<K, V>
-where
-    usize: TryFrom<K>,
-    <usize as TryFrom<K>>::Error: Debug,
-    K: Copy + Eq,
-{
+impl<V> HashMap<usize, V> {
     fn with_capacity(capacity: usize) -> Self {
         debug_assert!(capacity.is_power_of_two());
         Self {
@@ -957,11 +957,9 @@ where
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
-    // inlining improves benchmarks
-    #[inline]
-    fn entry(&mut self, key: K) -> Entry<'_, K, V> {
+    fn entry(&mut self, key: usize) -> Entry<'_, usize, V> {
         const HASH_SCAL: usize = 107;
-        let mut hash = (usize::try_from(key).unwrap() * HASH_SCAL) & (self.capacity - 1);
+        let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
         loop {
             // We redo the borrow in the success cases to avoid a borrowck weakness
             // TODO: rewrite without reborrow when polonius arrives
@@ -978,7 +976,7 @@ where
             }
         }
     }
-    fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
+    fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
         self.slots[..self.capacity]
             .iter_mut()
             .filter_map(|e| e.take().map(|(i, v)| (i, v)))
@@ -991,16 +989,12 @@ enum Entry<'a, K, V> {
 }
 
 impl<'a, K, V> Entry<'a, K, V> {
-    // inlining improves benchmarks
-    #[inline]
     fn and_modify<F: FnOnce(&mut V)>(mut self, f: F) -> Self {
         if let Entry::Occupied(ref mut v) = self {
             f(*v);
         }
         self
     }
-    // inlining improves benchmarks
-    #[inline]
     fn or_insert(self, default: V) -> &'a mut V {
         match self {
             Entry::Occupied(v) => v,

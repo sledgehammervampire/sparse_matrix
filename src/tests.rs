@@ -1,8 +1,9 @@
 mod dok {
-    use std::{fs, num::Wrapping};
+    use std::{convert::TryInto, fs, num::Wrapping};
 
     use cap_rand::{ambient_authority, prelude::CapRng};
-    use proptest::{prop_assert, test_runner::TestRunner};
+    use num::Num;
+    use proptest::{prop_assert, strategy::Strategy, test_runner::TestRunner};
     use walkdir::WalkDir;
 
     use crate::{
@@ -14,41 +15,49 @@ mod dok {
 
     const MAX_SIZE: usize = 10;
 
-    // base cases
-    #[test]
-    fn identity_invariants() {
+    fn constructor_invariants<S, F, T>(strategy: &S, f: F)
+    where
+        S: Strategy,
+        T: Num,
+        F: Fn(S::Value) -> DokMatrix<T>,
+    {
         let mut runner = TestRunner::default();
         runner
-            .run(&(0..MAX_SIZE), |n| {
-                if let Ok(m) = DokMatrix::<i8>::identity(n) {
-                    prop_assert!(m.invariants());
-                }
+            .run(strategy, |v| {
+                let m = f(v);
+                prop_assert!(m.invariants());
                 Ok(())
             })
             .unwrap();
+    }
+
+    // base cases
+    #[test]
+    fn new_invariants() {
+        constructor_invariants(
+            &(1..MAX_SIZE, 1..MAX_SIZE)
+                .prop_map(|(m, n)| (m.try_into().unwrap(), n.try_into().unwrap())),
+            DokMatrix::<i8>::new,
+        );
+    }
+
+    #[test]
+    fn identity_invariants() {
+        constructor_invariants(
+            &(1..MAX_SIZE).prop_map(|n| n.try_into().unwrap()),
+            DokMatrix::<i8>::identity,
+        );
     }
 
     #[test]
     fn arb_invariants() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
-                prop_assert!(m.invariants());
-                Ok(())
-            })
-            .unwrap();
+        constructor_invariants(&DokMatrix::<i8>::arb_matrix(), |m| m);
     }
 
     #[test]
     fn from_arb_csr_invariants() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&CsrMatrix::<i8, false>::arb_matrix(), |m| {
-                let m = DokMatrix::from(m);
-                prop_assert!(m.invariants());
-                Ok(())
-            })
-            .unwrap();
+        constructor_invariants(&CsrMatrix::<i8, false>::arb_matrix(), DokMatrix::from);
+        constructor_invariants(&CsrMatrix::<i8, true>::arb_matrix(), DokMatrix::from);
     }
 
     #[ignore = "expensive, parsing code not changed often"]
@@ -140,7 +149,7 @@ mod dok {
                 &arb_add_pair(DokMatrix::<i8>::arb_fixed_size_matrix),
                 |AddPair(mut m1, m2)| {
                     for (pos, t) in m2.iter() {
-                        m1.set_element(pos, t.clone());
+                        m1.set_element(pos, t.clone()).unwrap();
                     }
                     prop_assert!(m1.invariants());
                     Ok(())
@@ -154,10 +163,11 @@ mod csr {
     #[cfg(feature = "mkl")]
     use {crate::ComplexNewtype, std::convert::TryFrom};
 
-    use std::num::Wrapping;
+    use std::{convert::TryInto, fmt::Debug, num::Wrapping};
 
     use cap_rand::{ambient_authority, prelude::CapRng};
     use itertools::iproduct;
+    use num::Num;
     use proptest::{
         arbitrary::any, prop_assert, prop_assert_eq, strategy::Strategy, test_runner::TestRunner,
     };
@@ -171,47 +181,50 @@ mod csr {
 
     const MAX_SIZE: usize = 10;
 
-    // base cases
-    #[test]
-    fn new_invariants() {
+    fn test_constructor<S, F, G, H, T>(strategy: &S, f: F, g: G, h: H)
+    where
+        S: Strategy,
+        S::Value: Clone,
+        T: Num + Debug,
+        F: Fn(S::Value) -> DokMatrix<T>,
+        G: Fn(S::Value) -> CsrMatrix<T, false>,
+        H: Fn(S::Value) -> CsrMatrix<T, true>,
+    {
         let mut runner = TestRunner::default();
         runner
-            .run(&(0..MAX_SIZE, 0..MAX_SIZE), |(m, n)| {
-                if let Ok(m1) = CsrMatrix::<i8, false>::new(m, n) {
-                    prop_assert!(m1.invariants());
-                }
-                Ok(())
-            })
-            .unwrap();
-        runner
-            .run(&(0..MAX_SIZE, 0..MAX_SIZE), |(m, n)| {
-                if let Ok(m1) = CsrMatrix::<i8, true>::new(m, n) {
-                    prop_assert!(m1.invariants());
-                }
+            .run(strategy, |v| {
+                let m = f(v.clone());
+                let m1 = g(v.clone());
+                prop_assert!(m1.invariants());
+                prop_assert_eq!(&DokMatrix::from(m1), &m);
+                let m1 = h(v);
+                prop_assert!(m1.invariants());
+                prop_assert_eq!(DokMatrix::from(m1), m);
                 Ok(())
             })
             .unwrap();
     }
 
+    // base cases
+    #[test]
+    fn new() {
+        test_constructor(
+            &(1..MAX_SIZE, 1..MAX_SIZE)
+                .prop_map(|(m, n)| (m.try_into().unwrap(), n.try_into().unwrap())),
+            DokMatrix::<i8>::new,
+            CsrMatrix::new,
+            CsrMatrix::new,
+        );
+    }
+
     #[test]
     fn identity_invariants() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&(0..MAX_SIZE), |n| {
-                if let Ok(m) = CsrMatrix::<i8, false>::identity(n) {
-                    prop_assert!(m.invariants());
-                }
-                Ok(())
-            })
-            .unwrap();
-        runner
-            .run(&(0..MAX_SIZE), |n| {
-                if let Ok(m) = CsrMatrix::<i8, true>::identity(n) {
-                    prop_assert!(m.invariants());
-                }
-                Ok(())
-            })
-            .unwrap();
+        test_constructor(
+            &(1..MAX_SIZE).prop_map(|m| m.try_into().unwrap()),
+            DokMatrix::<i8>::identity,
+            CsrMatrix::identity,
+            CsrMatrix::identity,
+        );
     }
 
     #[test]
@@ -233,22 +246,136 @@ mod csr {
 
     #[test]
     fn from_arb_dok_invariants() {
+        test_constructor(
+            &DokMatrix::<i8>::arb_matrix(),
+            |m| m,
+            |m| {
+                let ambient_authority = ambient_authority();
+                let mut rng = CapRng::default(ambient_authority);
+                CsrMatrix::from_dok(m, &mut rng)
+            },
+            CsrMatrix::from,
+        );
+    }
+
+    // other
+    #[test]
+    fn rows() {
         let mut runner = TestRunner::default();
         runner
             .run(&DokMatrix::<i8>::arb_matrix(), |m| {
                 let ambient_authority = ambient_authority();
                 let mut rng = CapRng::default(ambient_authority);
 
-                let m1: CsrMatrix<_, false> = CsrMatrix::from_dok(m.clone(), &mut rng);
-                prop_assert!(m1.invariants(), "{:?}", m1);
-                let m1: CsrMatrix<_, true> = CsrMatrix::from(m.clone());
-                prop_assert!(m1.invariants(), "{:?}", m1);
+                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
+                prop_assert!(m.rows() == m1.rows());
+                let m1 = CsrMatrix::from(m.clone());
+                prop_assert!(m.rows() == m1.rows());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn cols() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let ambient_authority = ambient_authority();
+                let mut rng = CapRng::default(ambient_authority);
+
+                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
+                prop_assert!(m.cols() == m1.cols());
+                let m1 = CsrMatrix::from(m.clone());
+                prop_assert!(m.cols() == m1.cols());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn get_element() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let ambient_authority = ambient_authority();
+                let mut rng = CapRng::default(ambient_authority);
+
+                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
+                prop_assert!(
+                    iproduct!(0..m.rows().get(), 0..m.cols().get())
+                        .all(|pos| m.get_element(pos) == m1.get_element(pos)),
+                    "{:?}",
+                    m1
+                );
+                let m1 = CsrMatrix::from(m.clone());
+                prop_assert!(
+                    iproduct!(0..m.rows().get(), 0..m.cols().get())
+                        .all(|pos| m.get_element(pos) == m1.get_element(pos)),
+                    "{:?}",
+                    m1
+                );
                 Ok(())
             })
             .unwrap();
     }
 
     // inductive cases
+    #[test]
+    fn set_element() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(
+                &(1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| {
+                    (
+                        DokMatrix::<i8>::arb_fixed_size_matrix(
+                            rows.try_into().unwrap(),
+                            cols.try_into().unwrap(),
+                        ),
+                        0..rows,
+                        0..cols,
+                        any::<i8>(),
+                    )
+                }),
+                |(mut m, i, j, t)| {
+                    let ambient_authority = ambient_authority();
+                    let mut rng = CapRng::default(ambient_authority);
+
+                    let mut m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
+                    m.set_element((i, j), t.clone()).unwrap();
+                    m1.set_element((i, j), t.clone()).unwrap();
+                    prop_assert!(m1.invariants(), "{:?}", m1);
+                    prop_assert_eq!(&DokMatrix::from(m1), &m);
+                    let mut m1 = CsrMatrix::from(m.clone());
+                    m.set_element((i, j), t.clone()).unwrap();
+                    m1.set_element((i, j), t.clone()).unwrap();
+                    prop_assert!(m1.invariants(), "{:?}", m1);
+                    prop_assert_eq!(DokMatrix::from(m1), m);
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn transpose() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+                let ambient_authority = ambient_authority();
+                let mut rng = CapRng::default(ambient_authority);
+
+                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng).transpose();
+                prop_assert!(m1.invariants(), "{:?}", m1);
+                prop_assert_eq!(DokMatrix::from(m1), m.clone().transpose());
+                let m1 = CsrMatrix::from(m.clone()).transpose();
+                prop_assert!(m1.invariants(), "{:?}", m1);
+                prop_assert_eq!(DokMatrix::from(m1), m.transpose());
+                Ok(())
+            })
+            .unwrap();
+    }
+
     #[test]
     fn add() {
         let mut runner = TestRunner::default();
@@ -464,86 +591,6 @@ mod csr {
                     Ok(())
                 },
             )
-            .unwrap();
-    }
-
-    #[test]
-    fn transpose() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
-                let ambient_authority = ambient_authority();
-                let mut rng = CapRng::default(ambient_authority);
-
-                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng).transpose();
-                prop_assert!(m1.invariants(), "{:?}", m1);
-                prop_assert_eq!(DokMatrix::from(m1), m.clone().transpose());
-                let m1 = CsrMatrix::from(m.clone()).transpose();
-                prop_assert!(m1.invariants(), "{:?}", m1);
-                prop_assert_eq!(DokMatrix::from(m1), m.transpose());
-                Ok(())
-            })
-            .unwrap();
-    }
-
-    #[test]
-    fn set_element() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &(1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| {
-                    (
-                        DokMatrix::<i8>::arb_fixed_size_matrix(rows, cols),
-                        0..rows,
-                        0..cols,
-                        any::<i8>(),
-                    )
-                }),
-                |(mut m, i, j, t)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let mut m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
-                    m.set_element((i, j), t.clone());
-                    m1.set_element((i, j), t.clone());
-                    prop_assert!(m1.invariants(), "{:?}", m1);
-                    prop_assert_eq!(&DokMatrix::from(m1), &m);
-                    let mut m1 = CsrMatrix::from(m.clone());
-                    m.set_element((i, j), t.clone());
-                    m1.set_element((i, j), t.clone());
-                    prop_assert!(m1.invariants(), "{:?}", m1);
-                    prop_assert_eq!(DokMatrix::from(m1), m);
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
-
-    // other
-    #[test]
-    fn get_element() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
-                let ambient_authority = ambient_authority();
-                let mut rng = CapRng::default(ambient_authority);
-
-                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
-                prop_assert!(
-                    iproduct!(0..m.rows(), 0..m.cols())
-                        .all(|pos| m.get_element(pos) == m1.get_element(pos)),
-                    "{:?}",
-                    m1
-                );
-                let m1 = CsrMatrix::from(m.clone());
-                prop_assert!(
-                    iproduct!(0..m.rows(), 0..m.cols())
-                        .all(|pos| m.get_element(pos) == m1.get_element(pos)),
-                    "{:?}",
-                    m1
-                );
-                Ok(())
-            })
             .unwrap();
     }
 

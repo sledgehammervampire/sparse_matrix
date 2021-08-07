@@ -3,7 +3,7 @@ use std::{
     convert::{TryFrom, TryInto},
     marker::PhantomData,
     mem::{ManuallyDrop, MaybeUninit},
-    num::TryFromIntError,
+    num::{NonZeroUsize, TryFromIntError},
     ops::Mul,
     slice,
 };
@@ -31,8 +31,8 @@ impl<const IS_SORTED: bool> TryFrom<CsrMatrix<f64, IS_SORTED>> for MklCsrMatrix<
     type Error = TryFromIntError;
 
     fn try_from(m: CsrMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
-        let rows = m.rows.try_into()?;
-        let cols = m.cols.try_into()?;
+        let rows = m.rows.get().try_into()?;
+        let cols = m.cols.get().try_into()?;
         let offsets: Vec<_> = m
             .offsets
             .into_iter()
@@ -59,8 +59,8 @@ impl<const IS_SORTED: bool> TryFrom<CsrMatrix<ComplexNewtype<f64>, IS_SORTED>>
     type Error = TryFromIntError;
 
     fn try_from(m: CsrMatrix<ComplexNewtype<f64>, IS_SORTED>) -> Result<Self, Self::Error> {
-        let rows = m.rows.try_into()?;
-        let cols = m.cols.try_into()?;
+        let rows = m.rows.get().try_into()?;
+        let cols = m.cols.get().try_into()?;
         let offsets: Vec<_> = m
             .offsets
             .into_iter()
@@ -86,8 +86,8 @@ impl<const IS_SORTED: bool> TryFrom<MklCsrMatrix<f64, IS_SORTED>> for CsrMatrix<
     type Error = TryFromIntError;
 
     fn try_from(m: MklCsrMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
-        let rows = m.rows.try_into()?;
-        let cols = m.cols.try_into()?;
+        let rows = usize::try_from(m.rows)?.try_into()?;
+        let cols = usize::try_from(m.cols)?.try_into()?;
         let offsets: Vec<_> = m
             .offsets
             .into_iter()
@@ -114,8 +114,8 @@ impl<const IS_SORTED: bool> TryFrom<MklCsrMatrix<MKL_Complex16, IS_SORTED>>
     type Error = TryFromIntError;
 
     fn try_from(m: MklCsrMatrix<MKL_Complex16, IS_SORTED>) -> Result<Self, Self::Error> {
-        let rows = m.rows.try_into()?;
-        let cols = m.cols.try_into()?;
+        let rows = usize::try_from(m.rows)?.try_into()?;
+        let cols = usize::try_from(m.cols)?.try_into()?;
         let offsets: Vec<_> = m
             .offsets
             .into_iter()
@@ -291,13 +291,14 @@ impl<const IS_SORTED: bool> TryFrom<CMklSparseMatrix<f64, IS_SORTED>>
             return Err(Error::Mkl(MklError::try_from(status).unwrap()));
         }
         let indexing = usize::try_from(unsafe { indexing.assume_init() })?;
-        let rows = usize::try_from(unsafe { rows.assume_init() })?;
-        let cols = usize::try_from(unsafe { cols.assume_init() })?;
-        let mut offsets: Vec<_> = unsafe { slice::from_raw_parts(rows_start.assume_init(), rows) }
-            .iter()
-            .map(|i| Ok(usize::try_from(*i)? - indexing))
-            .collect::<Result<_, TryFromIntError>>()?;
-        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows - 1) }.try_into()?;
+        let rows = NonZeroUsize::try_from(usize::try_from(unsafe { rows.assume_init() })?)?;
+        let cols = NonZeroUsize::try_from(usize::try_from(unsafe { cols.assume_init() })?)?;
+        let mut offsets: Vec<_> =
+            unsafe { slice::from_raw_parts(rows_start.assume_init(), rows.get()) }
+                .iter()
+                .map(|i| Ok(usize::try_from(*i)? - indexing))
+                .collect::<Result<_, TryFromIntError>>()?;
+        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows.get() - 1) }.try_into()?;
         offsets.push(nnz);
         let indices: Vec<_> = unsafe { slice::from_raw_parts(col_indx.assume_init(), nnz) }
             .iter()
@@ -343,13 +344,14 @@ impl<const IS_SORTED: bool> TryFrom<CMklSparseMatrix<MKL_Complex16, IS_SORTED>>
             return Err(Error::Mkl(MklError::try_from(status).unwrap()));
         }
         let indexing = usize::try_from(unsafe { indexing.assume_init() })?;
-        let rows = usize::try_from(unsafe { rows.assume_init() })?;
-        let cols = usize::try_from(unsafe { cols.assume_init() })?;
-        let mut offsets: Vec<_> = unsafe { slice::from_raw_parts(rows_start.assume_init(), rows) }
-            .iter()
-            .map(|i| Ok(usize::try_from(*i)? - indexing))
-            .collect::<Result<_, TryFromIntError>>()?;
-        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows - 1) }.try_into()?;
+        let rows = NonZeroUsize::try_from(usize::try_from(unsafe { rows.assume_init() })?)?;
+        let cols = NonZeroUsize::try_from(usize::try_from(unsafe { cols.assume_init() })?)?;
+        let mut offsets: Vec<_> =
+            unsafe { slice::from_raw_parts(rows_start.assume_init(), rows.get()) }
+                .iter()
+                .map(|i| Ok(usize::try_from(*i)? - indexing))
+                .collect::<Result<_, TryFromIntError>>()?;
+        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows.get() - 1) }.try_into()?;
         offsets.push(nnz);
         let indices: Vec<_> = unsafe { slice::from_raw_parts(col_indx.assume_init(), nnz) }
             .iter()
