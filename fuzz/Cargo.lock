@@ -711,6 +711,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af8b08b04175473088b46763e51ee54da5f9a164bc162f615b91bc179dbf15a3"
 
 [[package]]
+name = "open-ambient"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa11265bfd160102dd4fe289decc3834dad1212540d47631d9e33b91157e5ffb"
+dependencies = [
+ "cap-std",
+]
+
+[[package]]
 name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -999,6 +1008,7 @@ dependencies = [
  "num",
  "num_cpus",
  "num_enum",
+ "open-ambient",
  "rayon",
  "rustc-hash",
  "thiserror",

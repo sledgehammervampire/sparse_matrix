@@ -41,7 +41,6 @@ pub struct AddPair<M>(pub M, pub M);
 #[derive(Clone, Debug)]
 pub struct MulPair<M>(pub M, pub M);
 
-#[cfg(test)]
 fn is_increasing<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {
@@ -54,12 +53,10 @@ fn is_increasing<T: Ord>(s: &[T]) -> bool {
     true
 }
 
-#[cfg(test)]
 fn all_distinct<T: std::hash::Hash + Eq>(s: &[T]) -> bool {
     s.iter().collect::<std::collections::HashSet<_>>().len() == s.len()
 }
 
-#[cfg(test)]
 fn is_sorted<T: Ord>(s: &[T]) -> bool {
     let mut max = None;
     for i in s {

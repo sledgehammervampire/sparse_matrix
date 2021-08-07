@@ -53,8 +53,7 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
             .map(move |(i, (c, t))| ((offsets.partition_point(|x| *x <= i) - 1, c), t))
     }
 
-    #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
+    pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
         self.offsets
             .iter()
             .copied()
@@ -66,8 +65,7 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
             })
     }
 
-    #[cfg(test)]
-    pub(crate) fn invariants(&self) -> bool {
+    pub fn invariants(&self) -> bool {
         self.invariant1()
             && self.invariant2()
             && self.invariant3()
@@ -77,34 +75,28 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
             && self.invariant7()
     }
 
-    #[cfg(test)]
     fn invariant1(&self) -> bool {
         self.indices.len() == self.vals.len()
     }
 
-    #[cfg(test)]
     fn invariant2(&self) -> bool {
         self.offsets.len() == self.rows.get().checked_add(1).unwrap()
     }
 
-    #[cfg(test)]
     fn invariant3(&self) -> bool {
         crate::is_sorted(&self.offsets)
     }
 
-    #[cfg(test)]
     fn invariant4(&self) -> bool {
         self.offsets[self.rows.get()] == self.indices.len()
     }
 
-    #[cfg(test)]
     fn invariant5(&self) -> bool {
         self.indices
             .iter()
             .all(|c| (0..self.cols.get()).contains(c))
     }
 
-    #[cfg(test)]
     fn invariant6(&self) -> bool {
         self.offsets.iter().copied().tuple_windows().all(|(a, b)| {
             if IS_SORTED {
@@ -115,7 +107,6 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
         })
     }
 
-    #[cfg(test)]
     fn invariant7(&self) -> bool {
         self.offsets[0] == 0
     }
