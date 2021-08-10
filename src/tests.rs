@@ -1,9 +1,10 @@
+#![allow(clippy::disallowed_method)]
 mod dok {
     use std::{convert::TryInto, fs, num::Wrapping};
 
     use cap_rand::{ambient_authority, prelude::CapRng};
     use num::Num;
-    use proptest::{prop_assert, strategy::Strategy, test_runner::TestRunner};
+    use proptest::{arbitrary::any, prop_assert, strategy::Strategy, test_runner::TestRunner};
     use walkdir::WalkDir;
 
     use crate::{
@@ -15,7 +16,7 @@ mod dok {
 
     const MAX_SIZE: usize = 10;
 
-    fn constructor_invariants<S, F, T>(strategy: &S, f: F)
+    fn test_invariants<S, F, T>(strategy: &S, f: F)
     where
         S: Strategy,
         T: Num,
@@ -34,7 +35,7 @@ mod dok {
     // base cases
     #[test]
     fn new_invariants() {
-        constructor_invariants(
+        test_invariants(
             &(1..MAX_SIZE, 1..MAX_SIZE)
                 .prop_map(|(m, n)| (m.try_into().unwrap(), n.try_into().unwrap())),
             DokMatrix::<i8>::new,
@@ -43,7 +44,7 @@ mod dok {
 
     #[test]
     fn identity_invariants() {
-        constructor_invariants(
+        test_invariants(
             &(1..MAX_SIZE).prop_map(|n| n.try_into().unwrap()),
             DokMatrix::<i8>::identity,
         );
@@ -51,18 +52,24 @@ mod dok {
 
     #[test]
     fn arb_invariants() {
-        constructor_invariants(&DokMatrix::<i8>::arb_matrix(), |m| m);
+        test_invariants(&DokMatrix::<i8>::arb_matrix(), |m| m);
     }
 
     #[test]
     fn from_arb_csr_invariants() {
-        constructor_invariants(&CsrMatrix::<i8, false>::arb_matrix(), DokMatrix::from);
-        constructor_invariants(&CsrMatrix::<i8, true>::arb_matrix(), DokMatrix::from);
+        test_invariants(&CsrMatrix::<i8, false>::arb_matrix(), DokMatrix::from);
+        test_invariants(&CsrMatrix::<i8, true>::arb_matrix(), DokMatrix::from);
     }
 
     #[ignore = "expensive, parsing code not changed often"]
     #[test]
     fn from_matrix_market() {
+        fn inner<T: Num + Clone>(m: DokMatrix<T>, rng: &mut CapRng) {
+            let m1 = CsrMatrix::from_dok(m.clone(), rng);
+            assert!(m1.invariants());
+            let m1 = CsrMatrix::from(m);
+            assert!(m1.invariants());
+        }
         let ambient_authority = ambient_authority();
         let mut rng = CapRng::default(ambient_authority);
         for entry in WalkDir::new("matrices") {
@@ -75,22 +82,13 @@ mod dok {
                     .unwrap()
                     {
                         MatrixType::Integer(m) => {
-                            let m1: CsrMatrix<_, false> = CsrMatrix::from_dok(m.clone(), &mut rng);
-                            assert!(m1.invariants());
-                            let m1: CsrMatrix<_, true> = CsrMatrix::from(m.clone());
-                            assert!(m1.invariants());
+                            inner(m, &mut rng);
                         }
                         MatrixType::Real(m) => {
-                            let m1: CsrMatrix<_, false> = CsrMatrix::from_dok(m.clone(), &mut rng);
-                            assert!(m1.invariants());
-                            let m1: CsrMatrix<_, true> = CsrMatrix::from(m.clone());
-                            assert!(m1.invariants());
+                            inner(m, &mut rng);
                         }
                         MatrixType::Complex(m) => {
-                            let m1: CsrMatrix<_, false> = CsrMatrix::from_dok(m.clone(), &mut rng);
-                            assert!(m1.invariants());
-                            let m1: CsrMatrix<_, true> = CsrMatrix::from(m.clone());
-                            assert!(m1.invariants());
+                            inner(m, &mut rng);
                         }
                     };
                 }
@@ -101,61 +99,44 @@ mod dok {
     // inductive cases
     #[test]
     fn add() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_add_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |AddPair(m1, m2)| {
-                    let m = m1.clone() + m2.clone();
-                    prop_assert!(m.invariants());
-                    Ok(())
-                },
-            )
-            .unwrap();
+        test_invariants(
+            &arb_add_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+            |AddPair(m1, m2)| m1 + m2,
+        );
     }
 
     #[test]
     fn mul() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    let m = &m1 * &m2;
-                    prop_assert!(m.invariants());
-                    Ok(())
-                },
-            )
-            .unwrap();
+        test_invariants(
+            &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
+            |MulPair(m1, m2)| &m1 * &m2,
+        );
     }
 
     #[test]
     fn transpose() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
-                let m1 = m.clone().transpose();
-                prop_assert!(m1.invariants());
-                Ok(())
-            })
-            .unwrap();
+        test_invariants(&DokMatrix::<i8>::arb_matrix(), DokMatrix::transpose);
     }
 
     #[test]
     fn set_element() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_add_pair(DokMatrix::<i8>::arb_fixed_size_matrix),
-                |AddPair(mut m1, m2)| {
-                    for (pos, t) in m2.iter() {
-                        m1.set_element(pos, t.clone()).unwrap();
-                    }
-                    prop_assert!(m1.invariants());
-                    Ok(())
-                },
-            )
-            .unwrap();
+        test_invariants(
+            &(1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| {
+                (
+                    DokMatrix::<i8>::arb_fixed_size_matrix(
+                        rows.try_into().unwrap(),
+                        cols.try_into().unwrap(),
+                    ),
+                    0..rows,
+                    0..cols,
+                    any::<i8>(),
+                )
+            }),
+            |(mut m, i, j, t)| {
+                m.set_element((i, j), t).unwrap();
+                m
+            },
+        );
     }
 }
 
@@ -181,25 +162,34 @@ mod csr {
 
     const MAX_SIZE: usize = 10;
 
-    fn test_constructor<S, F, G, H, T>(strategy: &S, f: F, g: G, h: H)
+    /*
+       the following diagram commutes:
+
+                         dok_op
+                      . -------> .
+                      |          ^
+    CsrMatrix::from   |          | DokMatrix::from
+                      v          |
+                      . -------> .
+                         csr_op
+        */
+    fn test_commutes<T, U, V, S, F, G, H>(strategy: &S, dok_val: F, gen_csr: G, into_val: H)
     where
+        T: Num + Debug,
+        U: Matrix<T>,
+        V: Eq + Debug,
         S: Strategy,
         S::Value: Clone,
-        T: Num + Debug,
-        F: Fn(S::Value) -> DokMatrix<T>,
-        G: Fn(S::Value) -> CsrMatrix<T, false>,
-        H: Fn(S::Value) -> CsrMatrix<T, true>,
+        F: Fn(S::Value) -> V,
+        G: Fn(S::Value) -> U,
+        H: Fn(U) -> V,
     {
         let mut runner = TestRunner::default();
         runner
             .run(strategy, |v| {
-                let m = f(v.clone());
-                let m1 = g(v.clone());
-                prop_assert!(m1.invariants());
-                prop_assert_eq!(&DokMatrix::from(m1), &m);
-                let m1 = h(v);
-                prop_assert!(m1.invariants());
-                prop_assert_eq!(DokMatrix::from(m1), m);
+                let m = gen_csr(v.clone());
+                prop_assert!(m.invariants());
+                prop_assert_eq!(into_val(m), dok_val(v));
                 Ok(())
             })
             .unwrap();
@@ -208,27 +198,41 @@ mod csr {
     // base cases
     #[test]
     fn new() {
-        test_constructor(
-            &(1..MAX_SIZE, 1..MAX_SIZE)
-                .prop_map(|(m, n)| (m.try_into().unwrap(), n.try_into().unwrap())),
+        let strategy = (1..MAX_SIZE, 1..MAX_SIZE)
+            .prop_map(|(m, n)| (m.try_into().unwrap(), n.try_into().unwrap()));
+        test_commutes(
+            &strategy,
             DokMatrix::<i8>::new,
-            CsrMatrix::new,
-            CsrMatrix::new,
+            CsrMatrix::<_, false>::new,
+            DokMatrix::from,
+        );
+        test_commutes(
+            &strategy,
+            DokMatrix::<i8>::new,
+            CsrMatrix::<_, true>::new,
+            DokMatrix::from,
         );
     }
 
     #[test]
-    fn identity_invariants() {
-        test_constructor(
-            &(1..MAX_SIZE).prop_map(|m| m.try_into().unwrap()),
+    fn identity() {
+        let strategy = (1..MAX_SIZE).prop_map(|m| m.try_into().unwrap());
+        test_commutes(
+            &strategy,
             DokMatrix::<i8>::identity,
-            CsrMatrix::identity,
-            CsrMatrix::identity,
+            CsrMatrix::<_, false>::identity,
+            DokMatrix::from,
+        );
+        test_commutes(
+            &strategy,
+            DokMatrix::<i8>::identity,
+            CsrMatrix::<_, true>::identity,
+            DokMatrix::from,
         );
     }
 
     #[test]
-    fn arb_invariants() {
+    fn arb() {
         let mut runner = TestRunner::default();
         runner
             .run(&CsrMatrix::<i8, false>::arb_matrix(), |m| {
@@ -245,8 +249,8 @@ mod csr {
     }
 
     #[test]
-    fn from_arb_dok_invariants() {
-        test_constructor(
+    fn from_arb_dok() {
+        test_commutes(
             &DokMatrix::<i8>::arb_matrix(),
             |m| m,
             |m| {
@@ -254,43 +258,55 @@ mod csr {
                 let mut rng = CapRng::default(ambient_authority);
                 CsrMatrix::from_dok(m, &mut rng)
             },
+            DokMatrix::from,
+        );
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            |m| m,
             CsrMatrix::from,
+            DokMatrix::from,
         );
     }
 
     // other
     #[test]
     fn rows() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            |m| DokMatrix::rows(&m),
+            |m| {
                 let ambient_authority = ambient_authority();
                 let mut rng = CapRng::default(ambient_authority);
-
-                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
-                prop_assert!(m.rows() == m1.rows());
-                let m1 = CsrMatrix::from(m.clone());
-                prop_assert!(m.rows() == m1.rows());
-                Ok(())
-            })
-            .unwrap();
+                CsrMatrix::from_dok(m, &mut rng)
+            },
+            |m| CsrMatrix::rows(&m),
+        );
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            |m| DokMatrix::rows(&m),
+            CsrMatrix::from,
+            |m| CsrMatrix::rows(&m),
+        );
     }
 
     #[test]
     fn cols() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            |m| DokMatrix::cols(&m),
+            |m| {
                 let ambient_authority = ambient_authority();
                 let mut rng = CapRng::default(ambient_authority);
-
-                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
-                prop_assert!(m.cols() == m1.cols());
-                let m1 = CsrMatrix::from(m.clone());
-                prop_assert!(m.cols() == m1.cols());
-                Ok(())
-            })
-            .unwrap();
+                CsrMatrix::from_dok(m, &mut rng)
+            },
+            |m| CsrMatrix::cols(&m),
+        );
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            |m| DokMatrix::cols(&m),
+            CsrMatrix::from,
+            |m| CsrMatrix::cols(&m),
+        );
     }
 
     #[test]
@@ -323,293 +339,102 @@ mod csr {
     // inductive cases
     #[test]
     fn set_element() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &(1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| {
-                    (
-                        DokMatrix::<i8>::arb_fixed_size_matrix(
-                            rows.try_into().unwrap(),
-                            cols.try_into().unwrap(),
-                        ),
-                        0..rows,
-                        0..cols,
-                        any::<i8>(),
-                    )
-                }),
-                |(mut m, i, j, t)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let mut m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
-                    m.set_element((i, j), t.clone()).unwrap();
-                    m1.set_element((i, j), t.clone()).unwrap();
-                    prop_assert!(m1.invariants(), "{:?}", m1);
-                    prop_assert_eq!(&DokMatrix::from(m1), &m);
-                    let mut m1 = CsrMatrix::from(m.clone());
-                    m.set_element((i, j), t.clone()).unwrap();
-                    m1.set_element((i, j), t.clone()).unwrap();
-                    prop_assert!(m1.invariants(), "{:?}", m1);
-                    prop_assert_eq!(DokMatrix::from(m1), m);
-                    Ok(())
-                },
+        let strategy = (1..MAX_SIZE, 1..MAX_SIZE).prop_flat_map(|(rows, cols)| {
+            (
+                DokMatrix::<i8>::arb_fixed_size_matrix(
+                    rows.try_into().unwrap(),
+                    cols.try_into().unwrap(),
+                ),
+                0..rows,
+                0..cols,
+                any::<i8>(),
             )
-            .unwrap();
+        });
+        let dok_val = |(mut m, i, j, t): (DokMatrix<_>, _, _, _)| {
+            m.set_element((i, j), t).unwrap();
+            m
+        };
+        test_commutes(
+            &strategy,
+            dok_val,
+            |(m, i, j, t)| {
+                let ambient_authority = ambient_authority();
+                let mut rng = CapRng::default(ambient_authority);
+                let mut m1 = CsrMatrix::from_dok(m, &mut rng);
+                m1.set_element((i, j), t).unwrap();
+                m1
+            },
+            DokMatrix::from,
+        );
+        test_commutes(
+            &strategy,
+            dok_val,
+            |(m, i, j, t)| {
+                let mut m1 = CsrMatrix::from(m);
+                m1.set_element((i, j), t).unwrap();
+                m1
+            },
+            DokMatrix::from,
+        );
     }
 
     #[test]
     fn transpose() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            DokMatrix::transpose,
+            |m| {
                 let ambient_authority = ambient_authority();
                 let mut rng = CapRng::default(ambient_authority);
-
-                let m1 = CsrMatrix::from_dok(m.clone(), &mut rng).transpose();
-                prop_assert!(m1.invariants(), "{:?}", m1);
-                prop_assert_eq!(DokMatrix::from(m1), m.clone().transpose());
-                let m1 = CsrMatrix::from(m.clone()).transpose();
-                prop_assert!(m1.invariants(), "{:?}", m1);
-                prop_assert_eq!(DokMatrix::from(m1), m.transpose());
-                Ok(())
-            })
-            .unwrap();
+                CsrMatrix::from_dok(m, &mut rng).transpose()
+            },
+            DokMatrix::from,
+        );
+        test_commutes(
+            &DokMatrix::<i8>::arb_matrix(),
+            DokMatrix::transpose,
+            |m| CsrMatrix::from(m).transpose(),
+            DokMatrix::from,
+        );
     }
 
     #[test]
     fn add() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_add_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |AddPair(m1, m2)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let m = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        + CsrMatrix::from_dok(m2.clone(), &mut rng);
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), m1.clone() + m2.clone());
-                    let m = CsrMatrix::from(m1.clone()) + CsrMatrix::from(m2.clone());
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), m1 + m2);
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn mul() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let m = &CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        * &CsrMatrix::from_dok(m2.clone(), &mut rng);
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = &CsrMatrix::from(m1.clone()) * &CsrMatrix::from(m2.clone());
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    Ok(())
-                },
-            )
-            .unwrap();
+        let strategy = arb_add_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix)
+            .prop_map(|AddPair(m1, m2)| (m1, m2));
+        test_commutes(
+            &strategy,
+            |(m1, m2)| m1 + m2,
+            |(m1, m2)| {
+                let ambient_authority = ambient_authority();
+                let mut rng = CapRng::default(ambient_authority);
+                CsrMatrix::from_dok(m1, &mut rng) + CsrMatrix::from_dok(m2, &mut rng)
+            },
+            DokMatrix::from,
+        );
+        test_commutes(
+            &strategy,
+            |(m1, m2)| m1 + m2,
+            |(m1, m2)| CsrMatrix::from(m1) + CsrMatrix::from(m2),
+            DokMatrix::from,
+        );
     }
 
     #[test]
     fn mul_hash() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let m: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, false> = CsrMatrix::from(m1.clone())
-                        .mul_hash(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, false> =
-                        CsrMatrix::from(m1.clone()).mul_hash(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> = CsrMatrix::from(m1.clone())
-                        .mul_hash(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> =
-                        CsrMatrix::from(m1.clone()).mul_hash(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn mul_btree() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let m = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_btree(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_btree(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = CsrMatrix::from(m1.clone())
-                        .mul_btree(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m = CsrMatrix::from(m1.clone()).mul_btree(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn mul_heap() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    let m = CsrMatrix::from(m1.clone()).mul_heap(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
-
-    // #[test]
-    // fn mul_esc() {
-    //     let mut runner = TestRunner::default();
-    //     runner
-    //         .run(
-    //             &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-    //             |MulPair(m1, m2)| {
-    //                 let m = <CsrMatrix<_, false> as From<_>>::from(m1.clone())
-    //                     .mul_esc::<false>(&CsrMatrix::from(m2.clone()));
-    //                 prop_assert!(m.invariants(), "{:?}", m);
-    //                 prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-    //                 let m = <CsrMatrix<_, false> as From<_>>::from(m1.clone())
-    //                     .mul_esc::<true>(&CsrMatrix::from(m2.clone()));
-    //                 prop_assert!(m.invariants(), "{:?}", m);
-    //                 prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-    //                 let m = <CsrMatrix<_, true> as From<_>>::from(m1.clone())
-    //                     .mul_esc::<false>(&CsrMatrix::from(m2.clone()));
-    //                 prop_assert!(m.invariants(), "{:?}", m);
-    //                 prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-    //                 let m = <CsrMatrix<_, true> as From<_>>::from(m1.clone())
-    //                     .mul_esc::<true>(&CsrMatrix::from(m2.clone()));
-    //                 prop_assert!(m.invariants(), "{:?}", m);
-    //                 prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-    //                 Ok(())
-    //             },
-    //         )
-    //         .unwrap();
-    // }
-
-    #[test]
-    fn mul_hash2() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(
-                &arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix),
-                |MulPair(m1, m2)| {
-                    let ambient_authority = ambient_authority();
-                    let mut rng = CapRng::default(ambient_authority);
-
-                    let m: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash2(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, false> = CsrMatrix::from(m1.clone())
-                        .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, false> =
-                        CsrMatrix::from(m1.clone()).mul_hash2(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> = CsrMatrix::from_dok(m1.clone(), &mut rng)
-                        .mul_hash2(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> = CsrMatrix::from(m1.clone())
-                        .mul_hash2(&CsrMatrix::from_dok(m2.clone(), &mut rng));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    let m: CsrMatrix<_, true> =
-                        CsrMatrix::from(m1.clone()).mul_hash2(&CsrMatrix::from(m2.clone()));
-                    prop_assert!(m.invariants(), "{:?}", m);
-                    prop_assert_eq!(DokMatrix::from(m), &m1 * &m2);
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn dok_roundtrip() {
-        let mut runner = TestRunner::default();
-        runner
-            .run(&DokMatrix::<i8>::arb_matrix(), |m| {
+        let strategy = arb_mul_pair::<Wrapping<i8>, _, _>(DokMatrix::arb_fixed_size_matrix)
+            .prop_map(|MulPair(m1, m2)| (m1, m2));
+        test_commutes(
+            &strategy,
+            |(m1, m2)| &m1 * &m2,
+            |(m1, m2)| {
                 let ambient_authority = ambient_authority();
                 let mut rng = CapRng::default(ambient_authority);
-
-                prop_assert_eq!(
-                    &m,
-                    &DokMatrix::from(CsrMatrix::from_dok(m.clone(), &mut rng))
-                );
-                prop_assert_eq!(&m, &DokMatrix::from(CsrMatrix::from(m.clone())));
-                Ok(())
-            })
-            .unwrap();
+                CsrMatrix::from_dok(m1, &mut rng)
+                    .mul_hash::<false, false>(&CsrMatrix::from_dok(m2, &mut rng))
+            },
+            DokMatrix::from,
+        );
     }
 
     #[cfg(feature = "mkl")]
@@ -622,9 +447,9 @@ mod csr {
             .run(
                 &arb_mul_pair(CsrMatrix::<f64, false>::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
-                    let mut m3 = MklCsrMatrix::try_from(m1.clone()).unwrap();
+                    let mut m3 = MklCsrMatrix::try_from(m1).unwrap();
                     let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
-                    let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
+                    let mut m4 = MklCsrMatrix::try_from(m2).unwrap();
                     let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
                     let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
                     prop_assert!(m5.invariants(), "{:?}", m5);
@@ -644,9 +469,9 @@ mod csr {
             .run(
                 &arb_mul_pair(CsrMatrix::<ComplexNewtype<f64>, false>::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
-                    let mut m3 = MklCsrMatrix::try_from(m1.clone()).unwrap();
+                    let mut m3 = MklCsrMatrix::try_from(m1).unwrap();
                     let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
-                    let mut m4 = MklCsrMatrix::try_from(m2.clone()).unwrap();
+                    let mut m4 = MklCsrMatrix::try_from(m2).unwrap();
                     let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
                     let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
                     prop_assert!(m5.invariants(), "{:?}", m5);

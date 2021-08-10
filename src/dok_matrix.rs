@@ -23,14 +23,14 @@ impl<T: Num> DokMatrix<T> {
     pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
         self.entries.iter().map(|(&p, t)| (p, t))
     }
+}
 
-    pub fn invariants(&self) -> bool {
+impl<T: Num> Matrix<T> for DokMatrix<T> {
+    fn invariants(&self) -> bool {
         self.iter()
             .all(|((r, c), t)| r < self.rows.get() && c < self.cols.get() && !t.is_zero())
     }
-}
 
-impl<T: Num + Clone> Matrix<T> for DokMatrix<T> {
     fn new((rows, cols): (NonZeroUsize, NonZeroUsize)) -> Self {
         DokMatrix {
             rows,

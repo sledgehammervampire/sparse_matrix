@@ -21,6 +21,7 @@ mod tests;
 pub struct IndexError;
 
 pub trait Matrix<T>: Sized {
+    fn invariants(&self) -> bool;
     fn new(size: (NonZeroUsize, NonZeroUsize)) -> Self;
     fn new_square(n: NonZeroUsize) -> Self;
     fn identity(n: NonZeroUsize) -> Self;
@@ -160,4 +161,56 @@ impl From<ComplexNewtype<f64>> for MKL_Complex16 {
             imag: z.0.im,
         }
     }
+}
+
+#[macro_export]
+macro_rules! gen_bench_mul {
+    ($f:ident) => {
+        fn bench_mul<const OUTPUT_SORTED: bool>(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
+            use cap_std::fs::DirEntry;
+            use criterion::Criterion;
+            use num::traits::NumAssign;
+            use spam::{
+                csr_matrix::CsrMatrix,
+                dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
+            };
+            use std::io::Read;
+
+            fn inner<T: NumAssign + Send + Sync + Copy, const B: bool>(
+                m: DokMatrix<T>,
+                criterion: &mut Criterion,
+                entry: DirEntry,
+            ) {
+                let m = CsrMatrix::from(m);
+                criterion.bench_function(
+                    &format!("bench {} {:?}", stringify!($f), entry.file_name()),
+                    |b| {
+                        b.iter(|| {
+                            let _: CsrMatrix<_, B> = m.$f(&m);
+                        });
+                    },
+                );
+            }
+
+            let mut criterion = Criterion::default().configure_from_args();
+            for entry in dir.entries()? {
+                let entry = entry?;
+                let mut input = String::new();
+                entry.open()?.read_to_string(&mut input)?;
+                match parse_matrix_market::<i64, f64>(&input).unwrap() {
+                    MatrixType::Integer(m) => {
+                        inner::<_, OUTPUT_SORTED>(m, &mut criterion, entry);
+                    }
+                    MatrixType::Real(m) => {
+                        inner::<_, OUTPUT_SORTED>(m, &mut criterion, entry);
+                    }
+                    MatrixType::Complex(m) => {
+                        inner::<_, OUTPUT_SORTED>(m, &mut criterion, entry);
+                    }
+                }
+            }
+            criterion.final_summary();
+            Ok(())
+        }
+    };
 }

@@ -21,19 +21,19 @@ fn bench_mul(dir: Dir) -> anyhow::Result<()> {
             MatrixType::Integer(m) => {
                 let m = CsrMatrix::from(m);
                 for _ in 0..100 {
-                    let _: CsrMatrix<_, false> = m.mul_hash2(&m);
+                    let _: CsrMatrix<_, false> = m.mul_hash(&m);
                 }
             }
             MatrixType::Real(m) => {
                 let m = CsrMatrix::from(m);
                 for _ in 0..100 {
-                    let _: CsrMatrix<_, false> = m.mul_hash2(&m);
+                    let _: CsrMatrix<_, false> = m.mul_hash(&m);
                 }
             }
             MatrixType::Complex(m) => {
                 let m = CsrMatrix::from(m);
                 for _ in 0..100 {
-                    let _: CsrMatrix<_, false> = m.mul_hash2(&m);
+                    let _: CsrMatrix<_, false> = m.mul_hash(&m);
                 }
             }
         }

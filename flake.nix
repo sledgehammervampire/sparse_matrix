@@ -14,19 +14,6 @@
           (import rust-overlay)
         ];
         pkgs = import nixpkgs { inherit system overlays; config.allowUnfree = true; };
-        xargo = pkgs.rustPlatform.buildRustPackage rec {
-          pname = "xargo";
-          version = "v0.3.23";
-          src = pkgs.fetchFromGitHub {
-            owner = "japaric";
-            repo = pname;
-            rev = "b64ed6614fd7578de3b7893538d63f4f23e3522f";
-            sha256 = "sha256-qMKcL64UcF+VfiqMfhAAoKdqs8xi/x6bFRo3OZJqiqw=";
-          };
-          cargoSha256 = "sha256-IdIGZbem8FEjj7XQ6218/MvEPE0qXoN5ZOZiv5JakIY=";
-          # FIXME
-          doCheck = false;
-        };
       in
         {
           devShell =
@@ -34,11 +21,11 @@
               {
                 buildInputs =
                   let
-                    myRust = rust-bin.nightly."2021-08-03".default.override { extensions = [ "rust-src" "miri" ]; };
+                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "clippy" ]; });
                   in
                     [
+                      rust
                       bashInteractive
-                      myRust
                       cargo-edit
                       cargo-fuzz
                       cargo-binutils
@@ -54,7 +41,6 @@
                       cargo-expand
                       linuxPackages.perf
                       cargo-geiger
-                      xargo
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib
@@ -64,8 +50,6 @@
                     );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
-                XARGO_CHECK = "${xargo}/bin/xargo-check";
-                MIRI_SYSROOT = "/home/rdp/.cache/miri/HOST";
               };
         }
   );

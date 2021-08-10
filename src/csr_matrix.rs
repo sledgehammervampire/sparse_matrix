@@ -3,12 +3,9 @@ use core::slice;
 use itertools::{iproduct, Itertools};
 use num::{traits::NumAssign, Num};
 use rayon::prelude::*;
-use rustc_hash::FxHasher;
 use std::{
     collections::BTreeMap,
-    convert::TryInto,
     fmt::Debug,
-    hash::BuildHasherDefault,
     iter::repeat_with,
     mem::{self, MaybeUninit},
     num::NonZeroUsize,
@@ -63,16 +60,6 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
                 let (indices, vals) = (&self.indices[rlo..rhi], &self.vals[rlo..rhi]);
                 indices.iter().map(move |c| (r, *c)).zip(vals.iter())
             })
-    }
-
-    pub fn invariants(&self) -> bool {
-        self.invariant1()
-            && self.invariant2()
-            && self.invariant3()
-            && self.invariant4()
-            && self.invariant5()
-            && self.invariant6()
-            && self.invariant7()
     }
 
     fn invariant1(&self) -> bool {
@@ -183,8 +170,10 @@ impl<T: Num, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
 fn test_into_iter() {
     use proptest::prop_assert_eq;
 
-    let mut config = proptest::test_runner::Config::default();
-    config.max_shrink_iters = 10000;
+    let config = proptest::test_runner::Config {
+        max_shrink_iters: 10000,
+        ..Default::default()
+    };
     let mut runner = proptest::test_runner::TestRunner::new(config);
     runner
         .run(&CsrMatrix::<i8, false>::arb_matrix(), |m| {
@@ -198,6 +187,16 @@ fn test_into_iter() {
 }
 
 impl<T: Num, const IS_SORTED: bool> Matrix<T> for CsrMatrix<T, IS_SORTED> {
+    fn invariants(&self) -> bool {
+        self.invariant1()
+            && self.invariant2()
+            && self.invariant3()
+            && self.invariant4()
+            && self.invariant5()
+            && self.invariant6()
+            && self.invariant7()
+    }
+
     fn new((rows, cols): (NonZeroUsize, NonZeroUsize)) -> Self {
         let capacity = 1000.min(rows.get() * cols.get() / 5);
         CsrMatrix {
@@ -299,7 +298,7 @@ impl<T: Num, const IS_SORTED: bool> Matrix<T> for CsrMatrix<T, IS_SORTED> {
     }
 }
 
-impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T, true> {
+impl<T: Num> From<DokMatrix<T>> for CsrMatrix<T, true> {
     fn from(old: DokMatrix<T>) -> Self {
         let (rows, cols) = (old.rows(), old.cols());
         let entries: Vec<_> = old.entries.into_iter().collect();
@@ -320,7 +319,7 @@ impl<T: Num + Clone> From<DokMatrix<T>> for CsrMatrix<T, true> {
     }
 }
 
-impl<T: Num + Clone> CsrMatrix<T, false> {
+impl<T: Num> CsrMatrix<T, false> {
     pub fn from_dok(old: DokMatrix<T>, rng: &mut CapRng) -> Self {
         let (rows, cols) = (old.rows(), old.cols());
         let mut entries: Vec<_> = old.entries.into_iter().collect();
@@ -343,161 +342,8 @@ impl<T: Num + Clone> CsrMatrix<T, false> {
     }
 }
 
-impl<T: NumAssign + Clone + Send + Sync> CsrMatrix<T, true> {
-    pub fn mul_heap(&self, rhs: &Self) -> Self {
-        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
-
-        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.offsets
-            .par_iter()
-            .zip(self.offsets.par_iter().skip(1))
-            .map(|(&a, &b)| {
-                self.indices[a..b]
-                    .iter()
-                    .zip(self.vals[a..b].iter())
-                    .map(|(&k, t)| {
-                        let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx
-                            .iter()
-                            .copied()
-                            .zip(rvals.iter().map(move |t1| t.clone() * t1.clone()))
-                    })
-                    .kmerge_by(|e1, e2| e1.0 < e2.0)
-                    .fold((vec![], vec![]), |(mut rcidx, mut rvals), (c, t)| {
-                        match (rcidx.last(), rvals.last_mut()) {
-                            (Some(&c1), Some(t1)) if c == c1 => {
-                                *t1 += t;
-                            }
-                            _ => {
-                                rcidx.push(c);
-                                rvals.push(t);
-                            }
-                        }
-                        (rcidx, rvals)
-                    })
-            })
-            .collect_into_vec(&mut rows);
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
-        for (rcidx, rvals) in rows {
-            cidx.extend(rcidx);
-            vals.extend(rvals);
-            ridx.push(cidx.len());
-        }
-        CsrMatrix {
-            rows: self.rows,
-            cols: rhs.cols,
-            vals,
-            indices: cidx,
-            offsets: ridx,
-        }
-    }
-}
-
-impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
-    pub fn mul_hash<const B: bool, const B1: bool>(
-        &self,
-        rhs: &CsrMatrix<T, B>,
-    ) -> CsrMatrix<T, B1> {
-        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
-
-        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.offsets
-            .par_iter()
-            .zip(self.offsets.par_iter().skip(1))
-            .map(|(&a, &b)| {
-                let capacity = self.indices[a..b]
-                    .iter()
-                    .map(|&k| rhs.get_row_entries(k).0.len())
-                    .sum();
-                let mut row = hashbrown::HashMap::with_capacity_and_hasher(
-                    capacity,
-                    BuildHasherDefault::<FxHasher>::default(),
-                );
-
-                self.indices[a..b]
-                    .iter()
-                    .zip(self.vals[a..b].iter())
-                    .for_each(|(&k, &t)| {
-                        let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx
-                            .iter()
-                            .zip(rvals.iter().map(move |&t1| t * t1))
-                            .for_each(|(&j, t1)| {
-                                row.entry(j)
-                                    .and_modify(|t| {
-                                        *t += t1;
-                                    })
-                                    .or_insert(t1);
-                            });
-                    });
-
-                if B1 {
-                    let mut row = row.into_iter().collect::<Vec<_>>();
-                    row.par_sort_unstable_by_key(|(c, _)| *c);
-                    row.into_iter().unzip()
-                } else {
-                    row.into_iter().unzip()
-                }
-            })
-            .collect_into_vec(&mut rows);
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
-        for (rcidx, rvals) in rows {
-            cidx.extend(rcidx);
-            vals.extend(rvals);
-            ridx.push(cidx.len());
-        }
-        CsrMatrix {
-            rows: self.rows,
-            cols: rhs.cols,
-            vals,
-            indices: cidx,
-            offsets: ridx,
-        }
-    }
-
-    pub fn mul_btree<const B: bool>(&self, rhs: &CsrMatrix<T, B>) -> CsrMatrix<T, true> {
-        assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
-
-        let mut rows: Vec<(Vec<usize>, Vec<T>)> = Vec::new();
-        self.offsets
-            .par_iter()
-            .zip(self.offsets.par_iter().skip(1))
-            .map(|(&a, &b)| {
-                let mut row = BTreeMap::new();
-
-                self.indices[a..b]
-                    .iter()
-                    .zip(self.vals[a..b].iter())
-                    .for_each(|(&k, &t)| {
-                        let (rcidx, rvals) = rhs.get_row_entries(k);
-                        rcidx.iter().zip(rvals.iter()).for_each(|(&j, &t1)| {
-                            let entry = row.entry(j).or_insert_with(T::zero);
-                            *entry += t * t1;
-                        });
-                    });
-
-                row.into_iter().unzip()
-            })
-            .collect_into_vec(&mut rows);
-        let (mut vals, mut cidx, mut ridx) = (vec![], vec![], vec![0]);
-        for (rcidx, rvals) in rows {
-            cidx.extend(rcidx);
-            vals.extend(rvals);
-            ridx.push(cidx.len());
-        }
-        CsrMatrix {
-            rows: self.rows,
-            cols: rhs.cols,
-            vals,
-            indices: cidx,
-            offsets: ridx,
-        }
-    }
-
-    fn rows_to_threads<const B: bool>(
-        &self,
-        rhs: &CsrMatrix<T, B>,
-    ) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
+    fn rows_to_threads<const B1: bool>(&self, rhs: &CsrMatrix<T, B1>) -> (Vec<usize>, Vec<usize>) {
         let row_nz: Vec<usize> = self
             .offsets
             .par_iter()
@@ -527,15 +373,15 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                 .map(|tid| ps_row_nz.partition_point(|&x| x < average_intprod * tid)),
         );
         rows_offset.push(self.rows.get());
-        (row_nz, ps_row_nz, rows_offset)
+        (row_nz, rows_offset)
     }
 
     // based off pengdada/mtspgemmlib
-    pub fn mul_hash2<const B: bool, const SORTED_OUTPUT: bool>(
+    pub fn mul_hash<const B1: bool, const B2: bool>(
         &self,
-        rhs: &CsrMatrix<T, B>,
-    ) -> CsrMatrix<T, SORTED_OUTPUT> {
-        let (mut row_nz, _, rows_offset) = self.rows_to_threads(rhs);
+        rhs: &CsrMatrix<T, B1>,
+    ) -> CsrMatrix<T, B2> {
+        let (mut row_nz, rows_offset) = self.rows_to_threads(rhs);
         // mutate row_nz or alloc new vec for new row_nz?
         crossbeam::scope(|s| {
             let mut rest = &mut row_nz[..];
@@ -655,7 +501,7 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                                     .or_insert(t1);
                             }
                         }
-                        if SORTED_OUTPUT {
+                        if B {
                             let mut row: Vec<_> = hm.drain().collect();
                             row.sort_unstable_by_key(|(c, _)| *c);
                             for (c, t) in row {
@@ -672,7 +518,7 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
                                 // SAFETY: tindices of each thread are disjoint slices of indices
                                 // SAFETY: tvals of each thread are disjoint slices of vals
                                 unsafe {
-                                    tindices[curr].as_mut_ptr().write(c.try_into().unwrap());
+                                    tindices[curr].as_mut_ptr().write(c);
                                     tvals[curr].as_mut_ptr().write(t);
                                 }
                                 curr += 1;
@@ -699,114 +545,6 @@ impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_S
     }
 }
 
-// impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> CsrMatrix<T, IS_SORTED> {
-//     pub fn mul_esc<const B: bool>(&self, rhs: &CsrMatrix<T, B>) -> CsrMatrix<T, true> {
-//         #[derive(Clone, Copy)]
-//         struct Entry<T> {
-//             col: usize,
-//             t: T,
-//         }
-//         impl<T> PartialEq for Entry<T> {
-//             fn eq(&self, other: &Self) -> bool {
-//                 self.col == other.col
-//             }
-//         }
-//         impl<T> PartialOrd for Entry<T> {
-//             fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-//                 self.col.partial_cmp(&other.col)
-//             }
-//         }
-//         impl<T: Copy + Send + Sync> Radixable<usize> for Entry<T> {
-//             type Key = usize;
-
-//             fn key(&self) -> Self::Key {
-//                 self.col
-//             }
-//         }
-
-//         let (flop, flop_ps, offset) = self.rows_to_threads(rhs);
-//         crossbeam::scope(|s| {
-//             let mut handles = vec![];
-//             for (tlo, thi) in offset.iter().copied().tuple_windows() {
-//                 let flop = &flop;
-//                 let flop_ps = &flop_ps;
-//                 let offset = &offset;
-//                 handles.push(s.spawn(move |_| {
-//                     let tflop = flop_ps[thi] - flop_ps[tlo];
-//                     let (mut indices_part, mut vals_part, mut lens_part) = (
-//                         Vec::with_capacity(tflop),
-//                         Vec::with_capacity(tflop),
-//                         Vec::with_capacity(thi - tlo),
-//                     );
-//                     for (i, (row_start, row_end)) in
-//                         (tlo..thi).zip(self.offsets[tlo..=thi].iter().copied().tuple_windows())
-//                     {
-//                         let mut entries = Vec::with_capacity(flop[i]);
-//                         entries.extend(
-//                             self.indices[row_start..row_end]
-//                                 .iter()
-//                                 .copied()
-//                                 .zip(&self.vals[row_start..row_end])
-//                                 .flat_map(|(k, &t)| {
-//                                     let (rcidx, rvals) = rhs.get_row_entries(k);
-//                                     rcidx
-//                                         .iter()
-//                                         .copied()
-//                                         .zip(rvals.iter().map(move |&t1| t * t1))
-//                                         .map(|(col, t)| Entry { col, t })
-//                                 }),
-//                         );
-//                         entries.voracious_mt_sort(offset.len() - 1);
-//                         let entries =
-//                             entries
-//                                 .into_iter()
-//                                 .fold(vec![], |mut v, Entry { col, t: t1 }| {
-//                                     match v.last_mut() {
-//                                         Some((c, t)) if *c == col => {
-//                                             *t += t1;
-//                                         }
-//                                         _ => {
-//                                             v.push((col, t1));
-//                                         }
-//                                     }
-//                                     v
-//                                 });
-
-//                         lens_part.push(entries.len());
-//                         for (c, t) in entries {
-//                             indices_part.push(c);
-//                             vals_part.push(t);
-//                         }
-//                     }
-
-//                     (indices_part, vals_part, lens_part)
-//                 }));
-//             }
-//             let (mut indices, mut vals, mut lens) = (vec![], vec![], vec![]);
-//             for h in handles {
-//                 let (indices_part, vals_part, lens_part) = h.join().unwrap();
-//                 indices.extend(indices_part);
-//                 vals.extend(vals_part);
-//                 lens.extend(lens_part);
-//             }
-//             let offsets = std::iter::once(0)
-//                 .chain(lens.into_iter().scan(0, |sum, x| {
-//                     *sum += x;
-//                     Some(*sum)
-//                 }))
-//                 .collect();
-//             CsrMatrix {
-//                 rows: self.rows,
-//                 cols: rhs.cols,
-//                 indices,
-//                 vals,
-//                 offsets,
-//             }
-//         })
-//         .unwrap()
-//     }
-// }
-
 #[cfg(test)]
 #[test]
 fn test_rows_to_threads() {
@@ -818,15 +556,10 @@ fn test_rows_to_threads() {
                 CsrMatrix::<_, false>::arb_fixed_size_matrix,
             ),
             |crate::MulPair(m1, m2)| {
-                let (flop, flop_ps, offsets) = m1.rows_to_threads(&m2);
+                let (flop, offsets) = m1.rows_to_threads(&m2);
                 prop_assert!(flop.len() == m1.rows().get());
-                prop_assert!(flop_ps.len() == m1.rows().get() + 1);
                 prop_assert!(crate::is_sorted(&offsets), "{:?}", offsets);
-                prop_assert!(
-                    offsets.iter().copied().all(|c| c <= m1.rows().get()),
-                    "{:?}",
-                    offsets
-                );
+                prop_assert!(*offsets.last().unwrap() == m1.rows().get(), "{:?}", offsets);
                 Ok(())
             },
         )
@@ -849,9 +582,8 @@ impl<T: Num, const IS_SORTED: bool> Sub for CsrMatrix<T, IS_SORTED> {
     }
 }
 
-impl<T: NumAssign + Copy + Send + Sync, const IS_SORTED: bool> Mul for &CsrMatrix<T, IS_SORTED> {
-    type Output = CsrMatrix<T, IS_SORTED>;
-
+impl<T: NumAssign + Copy + Send + Sync, const B: bool> Mul for &CsrMatrix<T, B> {
+    type Output = CsrMatrix<T, false>;
     fn mul(self, rhs: Self) -> Self::Output {
         self.mul_hash(rhs)
     }
@@ -875,7 +607,7 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, true> {
                 ridx.push(ridx.last().unwrap() + rcidx.len());
                 cidx_flattened.append(&mut rcidx);
             }
-            repeat_with(|| T::arbitrary())
+            repeat_with(T::arbitrary)
                 .take(cidx_flattened.len())
                 .collect::<Vec<_>>()
                 .prop_map(move |vals| CsrMatrix {
@@ -909,7 +641,7 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
                     ridx.push(ridx.last().unwrap() + rcidx.len());
                     cidx_flattened.extend(rcidx);
                 }
-                repeat_with(|| T::arbitrary())
+                repeat_with(T::arbitrary)
                     .take(cidx_flattened.len())
                     .collect::<Vec<_>>()
                     .prop_map(move |vals| CsrMatrix {
