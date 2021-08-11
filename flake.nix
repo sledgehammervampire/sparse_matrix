@@ -41,6 +41,7 @@
                       cargo-expand
                       linuxPackages.perf
                       cargo-geiger
+                      cargo-criterion
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib

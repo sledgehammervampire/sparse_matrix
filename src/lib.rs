@@ -1,3 +1,4 @@
+#![feature(allocator_api)]
 #![deny(clippy::disallowed_method)]
 #[cfg(feature = "mkl")]
 use mkl_sys::MKL_Complex16;

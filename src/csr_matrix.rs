@@ -4,6 +4,7 @@ use itertools::{iproduct, Itertools};
 use num::{traits::NumAssign, Num};
 use rayon::prelude::*;
 use std::{
+    alloc::{self, Allocator},
     collections::BTreeMap,
     fmt::Debug,
     iter::repeat_with,
@@ -659,21 +660,25 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
     }
 }
 
-struct HashMap<K, V> {
-    slots: Box<[Option<(K, V)>]>,
+struct HashMap<K, V, A = alloc::Global>
+where
+    A: Allocator,
+{
+    slots: Vec<Option<(K, V)>, A>,
     capacity: usize,
 }
 
-impl<V> HashMap<usize, V> {
+impl<V: Copy> HashMap<usize, V> {
     fn with_capacity(capacity: usize) -> Self {
+        HashMap::with_capacity_in(capacity, alloc::Global)
+    }
+}
+impl<V: Copy, A: Allocator> HashMap<usize, V, A> {
+    fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         debug_assert!(capacity.is_power_of_two());
-        Self {
-            slots: std::iter::repeat_with(|| None)
-                .take(capacity)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-            capacity,
-        }
+        let mut slots = Vec::with_capacity_in(capacity, alloc);
+        slots.resize(capacity, None);
+        Self { slots, capacity }
     }
     fn shrink_to(&mut self, capacity: usize) {
         debug_assert!(capacity.is_power_of_two());
