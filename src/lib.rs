@@ -214,3 +214,29 @@ macro_rules! gen_bench_mul {
         }
     };
 }
+
+#[macro_export]
+macro_rules! gen_mul_main {
+    ($f:ident) => {
+        fn mul_main(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
+            use spam::dok_matrix::{parse_matrix_market, MatrixType};
+            use std::io::Read;
+
+            for entry in dir.entries()? {
+                let entry = entry?;
+                let mut input = String::new();
+                entry.open()?.read_to_string(&mut input)?;
+                match parse_matrix_market::<i64, f64>(&input).unwrap() {
+                    MatrixType::Integer(_) => {}
+                    MatrixType::Real(m) => {
+                        $f(m);
+                    }
+                    MatrixType::Complex(m) => {
+                        $f(m);
+                    }
+                }
+            }
+            Ok(())
+        }
+    };
+}
