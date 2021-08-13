@@ -12,7 +12,6 @@ use std::{
 pub mod arbitrary;
 pub mod csr_matrix;
 pub mod dok_matrix;
-// mod hash_map2;
 #[cfg(test)]
 mod proptest;
 #[cfg(test)]

@@ -4,8 +4,9 @@ use itertools::{iproduct, Itertools};
 use num::{traits::NumAssign, Num};
 use rayon::prelude::*;
 use std::{
-    alloc::{self, Allocator},
+    alloc::{self, Allocator, Global},
     collections::BTreeMap,
+    convert::{TryFrom, TryInto},
     fmt::Debug,
     iter::repeat_with,
     mem::{self, MaybeUninit},
@@ -419,7 +420,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         .unwrap_or(0)
                         .checked_next_power_of_two()
                         .expect("next power of 2 doesn't fit a usize");
-                    let mut hs = HashMap::with_capacity(max_capacity);
+                    let mut hs = HashSet::with_capacity(max_capacity);
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
                         .copied()
@@ -439,10 +440,11 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         hs.shrink_to(capacity);
                         for &k in &self.indices[row_start..row_end] {
                             for &j in rhs.get_row_entries(k).0 {
-                                hs.entry(j).or_insert(());
+                                hs.insert(j.try_into().unwrap());
                             }
                         }
-                        *row_nz = hs.drain().count();
+                        *row_nz = hs.len();
+                        hs.clear();
                     }
                 });
             }
@@ -678,6 +680,62 @@ impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
     }
 }
 
+struct HashSet<A = Global>
+where
+    A: Allocator,
+{
+    slots: Vec<u32, A>,
+    capacity: usize,
+    items: usize,
+}
+
+impl HashSet {
+    fn with_capacity(capacity: usize) -> Self {
+        HashSet::with_capacity_in(capacity, Global)
+    }
+}
+impl<A: Allocator> HashSet<A> {
+    fn with_capacity_in(capacity: usize, alloc: A) -> Self {
+        debug_assert!(capacity.is_power_of_two());
+        let mut slots = Vec::with_capacity_in(capacity, alloc);
+        slots.resize(capacity, u32::MAX);
+        Self {
+            slots,
+            capacity,
+            items: 0,
+        }
+    }
+    fn shrink_to(&mut self, capacity: usize) {
+        debug_assert!(capacity.is_power_of_two());
+        debug_assert!(capacity <= self.slots.len());
+        self.capacity = capacity;
+    }
+    fn insert(&mut self, key: u32) {
+        debug_assert!(key != u32::MAX);
+        const HASH_SCAL: usize = 107;
+        let mut hash = (usize::try_from(key).unwrap() * HASH_SCAL) & (self.capacity - 1);
+        loop {
+            let curr = &mut self.slots[hash];
+            if *curr == key {
+                break;
+            } else if *curr == u32::MAX {
+                *curr = key;
+                self.items += 1;
+                break;
+            } else {
+                hash = (hash + 1) & (self.capacity - 1);
+            }
+        }
+    }
+    fn len(&self) -> usize {
+        self.items
+    }
+    fn clear(&mut self) {
+        self.slots.fill(u32::MAX);
+        self.items = 0;
+    }
+}
+
 struct HashMap<K, V, A = alloc::Global>
 where
     A: Allocator,
@@ -691,7 +749,8 @@ impl<V: Copy> HashMap<usize, V> {
         HashMap::with_capacity_in(capacity, alloc::Global)
     }
 }
-impl<V: Copy, A: Allocator> HashMap<usize, V, A> {
+
+impl<K: Clone, V: Copy, A: Allocator> HashMap<K, V, A> {
     fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         debug_assert!(capacity.is_power_of_two());
         let mut slots = Vec::with_capacity_in(capacity, alloc);
@@ -703,6 +762,14 @@ impl<V: Copy, A: Allocator> HashMap<usize, V, A> {
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
+    fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
+        self.slots[..self.capacity]
+            .iter_mut()
+            .filter_map(|e| e.take().map(|(i, v)| (i, v)))
+    }
+}
+
+impl<V: Copy, A: Allocator> HashMap<usize, V, A> {
     fn entry(&mut self, key: usize) -> Entry<'_, usize, V> {
         const HASH_SCAL: usize = 107;
         let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
@@ -721,11 +788,6 @@ impl<V: Copy, A: Allocator> HashMap<usize, V, A> {
                 }
             }
         }
-    }
-    fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
-        self.slots[..self.capacity]
-            .iter_mut()
-            .filter_map(|e| e.take().map(|(i, v)| (i, v)))
     }
 }
 

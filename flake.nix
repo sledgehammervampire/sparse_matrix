@@ -22,7 +22,7 @@
               {
                 buildInputs =
                   let
-                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "clippy" ]; });
+                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "clippy" "miri" "rust-src" ]; });
                   in
                     [
                       rust
@@ -43,6 +43,7 @@
                       linuxPackages.perf
                       cargo-geiger
                       cargo-criterion
+                      croaring
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib
