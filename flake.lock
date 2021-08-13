@@ -65,16 +65,18 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1628156331,
-        "narHash": "sha256-QUOqAQNJRwGZhak204WxdxxjFuSkkf5zpalFE+E0L8M=",
-        "owner": "NixOS",
+        "lastModified": 1628796276,
+        "narHash": "sha256-EUaG7KSvYwSmwLtCygu7BijFmwfNnKSQNsuSa7GCaeM=",
+        "owner": "1000teslas",
         "repo": "nixpkgs",
-        "rev": "743a80755051680d4b305d52809e7b8cc71630d2",
+        "rev": "f034896f8e27bcf51d40dd6bd66e41718d3225d9",
         "type": "github"
       },
       "original": {
-        "id": "nixpkgs",
-        "type": "indirect"
+        "owner": "1000teslas",
+        "ref": "rust-demangle-hotspot",
+        "repo": "nixpkgs",
+        "type": "github"
       }
     },
     "nixpkgs_2": {

@@ -2,6 +2,7 @@
   description = "A very basic flake";
 
   inputs = {
+    nixpkgs.url = github:1000teslas/nixpkgs/rust-demangle-hotspot;
     flake-utils.url = github:numtide/flake-utils;
     prusti-dev.url = github:1000teslas/prusti-dev;
     rust-overlay.url = github:oxalica/rust-overlay;

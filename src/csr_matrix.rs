@@ -344,6 +344,30 @@ impl<T: Num> CsrMatrix<T, false> {
 }
 
 impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
+    // based off pengdada/mtspgemmlib
+    pub fn mul_hash<const B1: bool, const B2: bool>(
+        &self,
+        rhs: &CsrMatrix<T, B1>,
+    ) -> CsrMatrix<T, B2> {
+        let (mut row_nz, rows_offset) = self.rows_to_threads(rhs);
+        Self::mul_hash_symbolic(self, rhs, &mut row_nz, &rows_offset);
+        let offsets: Vec<_> = std::iter::once(0)
+            .chain(row_nz.iter().copied().scan(0, |sum, x| {
+                *sum += x;
+                Some(*sum)
+            }))
+            .collect();
+        let (indices, vals) =
+            Self::mul_hash_numeric::<B1, B2>(self, rhs, &row_nz, &rows_offset, &offsets);
+        CsrMatrix {
+            rows: self.rows,
+            cols: rhs.cols,
+            indices,
+            vals,
+            offsets,
+        }
+    }
+
     fn rows_to_threads<const B1: bool>(&self, rhs: &CsrMatrix<T, B1>) -> (Vec<usize>, Vec<usize>) {
         let row_nz: Vec<usize> = self
             .offsets
@@ -377,28 +401,25 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
         (row_nz, rows_offset)
     }
 
-    // based off pengdada/mtspgemmlib
-    pub fn mul_hash<const B1: bool, const B2: bool>(
-        &self,
+    fn mul_hash_symbolic<const B1: bool>(
+        self: &CsrMatrix<T, B>,
         rhs: &CsrMatrix<T, B1>,
-    ) -> CsrMatrix<T, B2> {
-        let (mut row_nz, rows_offset) = self.rows_to_threads(rhs);
-        // mutate row_nz or alloc new vec for new row_nz?
-        crossbeam::scope(|s| {
-            let mut rest = &mut row_nz[..];
+        mut rest: &mut [usize],
+        rows_offset: &[usize],
+    ) {
+        crossbeam::scope(move |s| {
             for (tlo, thi) in rows_offset.iter().copied().tuple_windows() {
                 let (s1, s2) = rest.split_at_mut(thi - tlo);
                 rest = s2;
                 s.spawn(move |_| {
-                    // maximum of per row capacity
-                    let capacity = s1
+                    let max_capacity = s1
                         .iter()
                         .copied()
                         .max()
                         .unwrap_or(0)
                         .checked_next_power_of_two()
                         .expect("next power of 2 doesn't fit a usize");
-                    let mut hs = HashMap::with_capacity(capacity);
+                    let mut hs = HashMap::with_capacity(max_capacity);
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
                         .copied()
@@ -427,12 +448,15 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
             }
         })
         .unwrap();
-        let offsets: Vec<_> = std::iter::once(0)
-            .chain(row_nz.iter().copied().scan(0, |sum, x| {
-                *sum += x;
-                Some(*sum)
-            }))
-            .collect();
+    }
+
+    fn mul_hash_numeric<const B1: bool, const B2: bool>(
+        &self,
+        rhs: &CsrMatrix<T, B1>,
+        row_nz: &[usize],
+        rows_offset: &[usize],
+        offsets: &[usize],
+    ) -> (Vec<usize>, Vec<T>) {
         let nnz = *offsets.last().unwrap();
         let (mut indices, mut vals) = (Vec::with_capacity(nnz), Vec::with_capacity(nnz));
         crossbeam::scope(|s| {
@@ -536,13 +560,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
             indices.set_len(indices.capacity());
             vals.set_len(vals.capacity());
         }
-        CsrMatrix {
-            rows: self.rows,
-            cols: rhs.cols,
-            indices,
-            vals,
-            offsets,
-        }
+        (indices, vals)
     }
 }
 
