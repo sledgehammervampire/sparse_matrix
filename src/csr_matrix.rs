@@ -502,7 +502,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                                     .or_insert(t1);
                             }
                         }
-                        if B {
+                        if B2 {
                             let mut row: Vec<_> = hm.drain().collect();
                             row.sort_unstable_by_key(|(c, _)| *c);
                             for (c, t) in row {
