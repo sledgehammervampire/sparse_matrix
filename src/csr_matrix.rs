@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use std::{
     alloc::{self, Allocator, Global},
     collections::BTreeMap,
-    convert::{TryFrom, TryInto},
+    convert::TryFrom,
     fmt::Debug,
     iter::repeat_with,
     mem::{self, MaybeUninit},
@@ -440,7 +440,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         hs.shrink_to(capacity);
                         for &k in &self.indices[row_start..row_end] {
                             for &j in rhs.get_row_entries(k).0 {
-                                hs.insert(j.try_into().unwrap());
+                                hs.insert(j as u32);
                             }
                         }
                         *row_nz = hs.len();
@@ -740,21 +740,21 @@ struct HashMap<K, V, A = alloc::Global>
 where
     A: Allocator,
 {
-    slots: Vec<Option<(K, V)>, A>,
+    slots: Vec<(K, V), A>,
     capacity: usize,
 }
 
-impl<V: Copy> HashMap<usize, V> {
+impl<V: Copy + Num> HashMap<usize, V> {
     fn with_capacity(capacity: usize) -> Self {
         HashMap::with_capacity_in(capacity, alloc::Global)
     }
 }
 
-impl<K: Clone, V: Copy, A: Allocator> HashMap<K, V, A> {
+impl<V: Copy + Num, A: Allocator> HashMap<usize, V, A> {
     fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         debug_assert!(capacity.is_power_of_two());
         let mut slots = Vec::with_capacity_in(capacity, alloc);
-        slots.resize(capacity, None);
+        slots.resize(capacity, (usize::MAX, V::zero()));
         Self { slots, capacity }
     }
     fn shrink_to(&mut self, capacity: usize) {
@@ -762,38 +762,35 @@ impl<K: Clone, V: Copy, A: Allocator> HashMap<K, V, A> {
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
-    fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
-        self.slots[..self.capacity]
-            .iter_mut()
-            .filter_map(|e| e.take().map(|(i, v)| (i, v)))
-    }
-}
-
-impl<V: Copy, A: Allocator> HashMap<usize, V, A> {
     fn entry(&mut self, key: usize) -> Entry<'_, usize, V> {
+        debug_assert!(key != usize::MAX);
         const HASH_SCAL: usize = 107;
         let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
         loop {
-            // We redo the borrow in the success cases to avoid a borrowck weakness
-            // TODO: rewrite without reborrow when polonius arrives
-            match &self.slots[hash] {
-                Some((k, _)) if *k == key => {
-                    break Entry::Occupied(&mut self.slots[hash].as_mut().unwrap().1);
-                }
-                Some(_) => {
-                    hash = (hash + 1) & (self.capacity - 1);
-                }
-                None => {
-                    break Entry::Vacant(key, &mut self.slots[hash]);
-                }
+            let curr = &mut self.slots[hash];
+            if curr.0 == key {
+                break Entry::Occupied(&mut self.slots[hash].1);
+            } else if curr.0 == usize::MAX {
+                break Entry::Vacant(key, &mut self.slots[hash]);
+            } else {
+                hash = (hash + 1) & (self.capacity - 1);
             }
         }
+    }
+    fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
+        self.slots[..self.capacity].iter_mut().filter_map(|e| {
+            (e.0 != usize::MAX).then(|| {
+                let res = *e;
+                e.0 = usize::MAX;
+                res
+            })
+        })
     }
 }
 
 enum Entry<'a, K, V> {
     Occupied(&'a mut V),
-    Vacant(K, &'a mut Option<(K, V)>),
+    Vacant(K, &'a mut (K, V)),
 }
 
 impl<'a, K, V> Entry<'a, K, V> {
@@ -803,12 +800,12 @@ impl<'a, K, V> Entry<'a, K, V> {
         }
         self
     }
-    fn or_insert(self, default: V) -> &'a mut V {
+    fn or_insert(self, v: V) -> &'a mut V {
         match self {
             Entry::Occupied(v) => v,
             Entry::Vacant(k, slot) => {
-                *slot = Some((k, default));
-                slot.as_mut().map(|(_, v)| v).unwrap()
+                *slot = (k, v);
+                &mut slot.1
             }
         }
     }
