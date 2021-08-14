@@ -10,7 +10,7 @@ use std::{
     fmt::Debug,
     iter::repeat_with,
     mem::{self, MaybeUninit},
-    num::NonZeroUsize,
+    num::{NonZeroU8, NonZeroUsize},
     ops::{Add, Mul, Sub},
     vec,
 };
@@ -740,21 +740,22 @@ struct HashMap<K, V, A = alloc::Global>
 where
     A: Allocator,
 {
-    slots: Vec<(K, V), A>,
+    // size_of::<Option<(NonZeroU8,u32,f64)>> == 16 while size_of::<Option<(u32,f64)>> == 24
+    slots: Vec<Option<(NonZeroU8, K, V)>, A>,
     capacity: usize,
 }
 
-impl<V: Copy + Num> HashMap<usize, V> {
+impl<V: Copy + Num> HashMap<u32, V> {
     fn with_capacity(capacity: usize) -> Self {
         HashMap::with_capacity_in(capacity, alloc::Global)
     }
 }
 
-impl<V: Copy + Num, A: Allocator> HashMap<usize, V, A> {
+impl<V: Copy + Num, A: Allocator> HashMap<u32, V, A> {
     fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         debug_assert!(capacity.is_power_of_two());
         let mut slots = Vec::with_capacity_in(capacity, alloc);
-        slots.resize(capacity, (usize::MAX, V::zero()));
+        slots.resize(capacity, None);
         Self { slots, capacity }
     }
     fn shrink_to(&mut self, capacity: usize) {
@@ -762,35 +763,30 @@ impl<V: Copy + Num, A: Allocator> HashMap<usize, V, A> {
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
-    fn entry(&mut self, key: usize) -> Entry<'_, usize, V> {
+    fn entry(&mut self, key: usize) -> Entry<'_, u32, V> {
         debug_assert!(key != usize::MAX);
         const HASH_SCAL: usize = 107;
         let mut hash = (key * HASH_SCAL) & (self.capacity - 1);
         loop {
-            let curr = &mut self.slots[hash];
-            if curr.0 == key {
-                break Entry::Occupied(&mut self.slots[hash].1);
-            } else if curr.0 == usize::MAX {
-                break Entry::Vacant(key, &mut self.slots[hash]);
-            } else {
-                hash = (hash + 1) & (self.capacity - 1);
+            match self.slots[hash] {
+                Some((_, k, _)) if k == key as u32 => {
+                    break Entry::Occupied(&mut self.slots[hash].as_mut().unwrap().2)
+                }
+                None => break Entry::Vacant(key as u32, &mut self.slots[hash]),
+                Some(_) => hash = (hash + 1) & (self.capacity - 1),
             }
         }
     }
     fn drain(&mut self) -> impl Iterator<Item = (usize, V)> + '_ {
-        self.slots[..self.capacity].iter_mut().filter_map(|e| {
-            (e.0 != usize::MAX).then(|| {
-                let res = *e;
-                e.0 = usize::MAX;
-                res
-            })
-        })
+        self.slots[..self.capacity]
+            .iter_mut()
+            .filter_map(|e| e.take().map(|(_, k, v)| (k as usize, v)))
     }
 }
 
 enum Entry<'a, K, V> {
     Occupied(&'a mut V),
-    Vacant(K, &'a mut (K, V)),
+    Vacant(K, &'a mut Option<(NonZeroU8, K, V)>),
 }
 
 impl<'a, K, V> Entry<'a, K, V> {
@@ -804,8 +800,8 @@ impl<'a, K, V> Entry<'a, K, V> {
         match self {
             Entry::Occupied(v) => v,
             Entry::Vacant(k, slot) => {
-                *slot = (k, v);
-                &mut slot.1
+                *slot = Some((NonZeroU8::new(1).unwrap(), k, v));
+                slot.as_mut().map(|e| &mut e.2).unwrap()
             }
         }
     }
