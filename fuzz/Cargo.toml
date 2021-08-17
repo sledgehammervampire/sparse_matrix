@@ -36,7 +36,7 @@ test = false
 doc = false
 
 [[bin]]
-name = "mul_hash2"
-path = "fuzz_targets/mul_hash2.rs"
+name = "mul_hash"
+path = "fuzz_targets/mul_hash.rs"
 test = false
 doc = false
