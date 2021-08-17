@@ -448,11 +448,14 @@ mod csr {
                 &arb_mul_pair(CsrMatrix::<f64, false>::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
                     let mut m3 = MklCsrMatrix::try_from(m1).unwrap();
-                    let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
                     let mut m4 = MklCsrMatrix::try_from(m2).unwrap();
-                    let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
-                    let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
-                    prop_assert!(m5.invariants(), "{:?}", m5);
+                    if let (Ok(m3), Ok(m4)) = (
+                        RustMklSparseMatrix::try_from(&mut m3),
+                        RustMklSparseMatrix::try_from(&mut m4),
+                    ) {
+                        let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
+                        prop_assert!(m5.invariants(), "{:?}", m5);
+                    }
                     Ok(())
                 },
             )
@@ -470,11 +473,14 @@ mod csr {
                 &arb_mul_pair(CsrMatrix::<ComplexNewtype<f64>, false>::arb_fixed_size_matrix),
                 |MulPair(m1, m2)| {
                     let mut m3 = MklCsrMatrix::try_from(m1).unwrap();
-                    let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
                     let mut m4 = MklCsrMatrix::try_from(m2).unwrap();
-                    let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
-                    let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
-                    prop_assert!(m5.invariants(), "{:?}", m5);
+                    if let (Ok(m3), Ok(m4)) = (
+                        RustMklSparseMatrix::try_from(&mut m3),
+                        RustMklSparseMatrix::try_from(&mut m4),
+                    ) {
+                        let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
+                        prop_assert!(m5.invariants(), "{:?}", m5);
+                    }
                     Ok(())
                 },
             )
