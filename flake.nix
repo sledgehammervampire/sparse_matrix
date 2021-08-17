@@ -43,7 +43,6 @@
                       linuxPackages.perf
                       cargo-geiger
                       cargo-criterion
-                      croaring
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib

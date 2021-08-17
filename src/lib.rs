@@ -1,4 +1,4 @@
-#![feature(allocator_api)]
+#![feature(allocator_api, type_alias_impl_trait)]
 #![deny(clippy::disallowed_method)]
 #[cfg(feature = "mkl")]
 use mkl_sys::MKL_Complex16;
@@ -103,6 +103,7 @@ macro_rules! impl_bin_op_assign {
     };
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComplexNewtype<T>(Complex<T>);
 

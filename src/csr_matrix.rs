@@ -346,6 +346,7 @@ impl<T: Num> CsrMatrix<T, false> {
 
 impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
     // based off pengdada/mtspgemmlib
+    // requires: rhs column indices must fit in a u32
     pub fn mul_hash<const B1: bool, const B2: bool>(
         &self,
         rhs: &CsrMatrix<T, B1>,
@@ -378,14 +379,14 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                 self.indices[a..b]
                     .iter()
                     .map(|&k| rhs.get_row_entries(k).0.len())
-                    .sum()
+                    .try_fold(0usize, |sum, x| sum.checked_add(x))
+                    .unwrap()
             })
             .collect();
         // TODO: make prefix sum parallel
         let ps_row_nz: Vec<_> = std::iter::once(0)
-            .chain(row_nz.iter().copied().scan(0, |sum, x| {
-                *sum += x;
-                Some(*sum)
+            .chain(row_nz.iter().copied().scan(0usize, |sum, x| {
+                sum.checked_add(x)
             }))
             .collect();
         let total_intprod = ps_row_nz.last().copied().unwrap();

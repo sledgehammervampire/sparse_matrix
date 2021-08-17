@@ -8,7 +8,7 @@ use proptest::{
 
 use crate::{dok_matrix::DokMatrix, AddPair, ComplexNewtype, Matrix, MulPair};
 
-const MAX_SIZE: usize = 20;
+const MAX_SIZE: usize = 5;
 
 pub fn arb_matrix<T: Arbitrary, F: Fn(NonZeroUsize, NonZeroUsize) -> S, S: Strategy>(
     arb_matrix_fixed_size: F,
@@ -112,8 +112,7 @@ impl<T: Arbitrary + Num + Clone> DokMatrix<T> {
 
 impl<T: Arbitrary> Arbitrary for ComplexNewtype<T> {
     type Parameters = ();
-    type Strategy =
-        proptest::strategy::Map<(T::Strategy, T::Strategy), fn((T, T)) -> ComplexNewtype<T>>;
+    type Strategy = impl Strategy<Value = ComplexNewtype<T>>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         (any::<T>(), any::<T>()).prop_map(|(re, im)| ComplexNewtype(Complex { re, im }))
