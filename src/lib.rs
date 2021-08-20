@@ -1,4 +1,4 @@
-#![feature(allocator_api, type_alias_impl_trait)]
+#![feature(allocator_api, type_alias_impl_trait, is_sorted)]
 #![deny(clippy::disallowed_method)]
 #[cfg(feature = "mkl")]
 use mkl_sys::MKL_Complex16;
@@ -56,18 +56,6 @@ fn is_increasing<T: Ord>(s: &[T]) -> bool {
 
 fn all_distinct<T: std::hash::Hash + Eq>(s: &[T]) -> bool {
     s.iter().collect::<std::collections::HashSet<_>>().len() == s.len()
-}
-
-fn is_sorted<T: Ord>(s: &[T]) -> bool {
-    let mut max = None;
-    for i in s {
-        if max.map_or(true, |k| k <= i) {
-            max = Some(i);
-        } else {
-            return false;
-        }
-    }
-    true
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
