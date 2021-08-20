@@ -14,8 +14,7 @@ use std::{
     mem::{align_of, size_of, ManuallyDrop, MaybeUninit},
     num::{NonZeroUsize, TryFromIntError},
     ops::Mul,
-    ptr::{self, NonNull},
-    slice,
+    ptr::NonNull,
 };
 
 const MKL_ALIGN: i32 = 128;
@@ -46,21 +45,30 @@ pub enum AllocationError {
     AllocationFailed,
 }
 
+pub trait IntoMklScalar: Sized {
+    type Output: From<Self>;
+}
+
+impl IntoMklScalar for f64 {
+    type Output = f64;
+}
+impl IntoMklScalar for ComplexNewtype<f64> {
+    type Output = MKL_Complex16;
+}
+
 pub struct MklCsrMatrix<T, const IS_SORTED: bool> {
     rows: MKL_INT,
     cols: MKL_INT,
-    // null when empty
-    vals: Option<NonNull<T>>,
-    // null when empty
-    indices: Option<NonNull<MKL_INT>>,
+    vals: NonNull<T>,
+    indices: NonNull<MKL_INT>,
     offsets: NonNull<MKL_INT>,
 }
 
 impl<T, const IS_SORTED: bool> Drop for MklCsrMatrix<T, IS_SORTED> {
     fn drop(&mut self) {
         unsafe {
-            self.vals.take().map(|ptr| MKL_free(ptr.as_ptr().cast()));
-            self.indices.take().map(|ptr| MKL_free(ptr.as_ptr().cast()));
+            MKL_free(self.vals.as_ptr().cast());
+            MKL_free(self.indices.as_ptr().cast());
             MKL_free(self.offsets.as_ptr().cast());
         }
     }
@@ -74,91 +82,33 @@ pub enum FromCsrError {
     Allocation(#[from] AllocationError),
 }
 
-impl<const IS_SORTED: bool> TryFrom<CsrMatrix<f64, IS_SORTED>> for MklCsrMatrix<f64, IS_SORTED> {
-    type Error = FromCsrError;
-
-    fn try_from(m: CsrMatrix<f64, IS_SORTED>) -> Result<Self, Self::Error> {
-        let rows = m.rows.get().try_into()?;
-        let cols = m.cols.get().try_into()?;
-        let nnz = m.vals.len();
-        let vals = match alloc(nnz) {
-            Ok(p) => Some(p),
-            Err(AllocationError::ZeroSized) => None,
-            Err(e) => return Err(e.into()),
-        };
-        for (i, t) in m.vals.into_iter().enumerate() {
-            let ptr: *mut f64 = vals.unwrap().as_ptr();
-            debug_assert!(i < nnz);
-            debug_assert!(usize::try_from(MKL_ALIGN).unwrap() % align_of::<f64>() == 0);
-            unsafe {
-                ptr.wrapping_add(i).write(t);
-            }
-        }
-        debug_assert!(m.indices.len() == nnz);
-        let indices = match alloc(nnz) {
-            Ok(p) => Some(p),
-            Err(AllocationError::ZeroSized) => None,
-            Err(e) => return Err(e.into()),
-        };
-        for (i, c) in m.indices.into_iter().enumerate() {
-            let ptr: *mut MKL_INT = indices.unwrap().as_ptr();
-            debug_assert!(i < nnz);
-            debug_assert!(usize::try_from(MKL_ALIGN).unwrap() % align_of::<MKL_INT>() == 0);
-            unsafe {
-                ptr.wrapping_add(i).write(c.try_into()?);
-            }
-        }
-        debug_assert!(m.offsets.len() == m.rows.get().checked_add(1).unwrap());
-        debug_assert!(m.offsets[m.rows.get()] == nnz);
-        let offsets = alloc(m.offsets.len())?;
-        for (i, o) in m.offsets.into_iter().enumerate() {
-            let ptr: *mut MKL_INT = offsets.as_ptr();
-            debug_assert!(i <= m.rows.get());
-            debug_assert!(usize::try_from(MKL_ALIGN).unwrap() % align_of::<MKL_INT>() == 0);
-            unsafe {
-                ptr.wrapping_add(i).write(o.try_into()?);
-            }
-        }
-        Ok(MklCsrMatrix {
-            rows,
-            cols,
-            vals,
-            indices,
-            offsets,
-        })
-    }
-}
-
-impl<const IS_SORTED: bool> TryFrom<CsrMatrix<ComplexNewtype<f64>, IS_SORTED>>
-    for MklCsrMatrix<MKL_Complex16, IS_SORTED>
+impl<T, const IS_SORTED: bool> TryFrom<CsrMatrix<T, IS_SORTED>>
+    for MklCsrMatrix<T::Output, IS_SORTED>
+where
+    T: IntoMklScalar,
 {
     type Error = FromCsrError;
 
-    fn try_from(m: CsrMatrix<ComplexNewtype<f64>, IS_SORTED>) -> Result<Self, Self::Error> {
+    fn try_from(m: CsrMatrix<T, IS_SORTED>) -> Result<Self, Self::Error> {
         let rows = m.rows.get().try_into()?;
         let cols = m.cols.get().try_into()?;
         let nnz = m.vals.len();
-        let vals = match alloc(nnz) {
-            Ok(p) => Some(p),
-            Err(AllocationError::ZeroSized) => None,
-            Err(e) => return Err(e.into()),
-        };
+        let vals = alloc(nnz)?;
         for (i, t) in m.vals.into_iter().enumerate() {
-            let ptr: *mut MKL_Complex16 = vals.unwrap().as_ptr();
+            let ptr: *mut T::Output = vals.as_ptr();
             debug_assert!(i < nnz);
-            debug_assert!(usize::try_from(MKL_ALIGN).unwrap() % align_of::<f64>() == 0);
+            assert_eq!(
+                usize::try_from(MKL_ALIGN).unwrap() % align_of::<T::Output>(),
+                0
+            );
             unsafe {
                 ptr.wrapping_add(i).write(t.into());
             }
         }
         debug_assert!(m.indices.len() == nnz);
-        let indices = match alloc(nnz) {
-            Ok(p) => Some(p),
-            Err(AllocationError::ZeroSized) => None,
-            Err(e) => return Err(e.into()),
-        };
+        let indices = alloc(nnz)?;
         for (i, c) in m.indices.into_iter().enumerate() {
-            let ptr: *mut MKL_INT = indices.unwrap().as_ptr();
+            let ptr: *mut MKL_INT = indices.as_ptr();
             debug_assert!(i < nnz);
             debug_assert!(usize::try_from(MKL_ALIGN).unwrap() % align_of::<MKL_INT>() == 0);
             unsafe {
@@ -269,8 +219,8 @@ impl<'a, const IS_SORTED: bool> TryFrom<&'a mut MklCsrMatrix<f64, IS_SORTED>>
                 m.cols,
                 rows_start,
                 rows_end,
-                m.indices.map_or(ptr::null_mut(), NonNull::as_ptr),
-                m.vals.map_or(ptr::null_mut(), NonNull::as_ptr),
+                m.indices.as_ptr(),
+                m.vals.as_ptr(),
             )
         };
         if status != SPARSE_STATUS_SUCCESS {
@@ -304,8 +254,8 @@ impl<'a, const IS_SORTED: bool> TryFrom<&'a mut MklCsrMatrix<MKL_Complex16, IS_S
                 m.cols,
                 rows_start,
                 rows_end,
-                m.indices.map_or(ptr::null_mut(), NonNull::as_ptr),
-                m.vals.map_or(ptr::null_mut(), NonNull::as_ptr),
+                m.indices.as_ptr(),
+                m.vals.as_ptr(),
             )
         };
         if status != SPARSE_STATUS_SUCCESS {
@@ -347,20 +297,28 @@ impl<const IS_SORTED: bool> TryFrom<CMklSparseMatrix<f64, IS_SORTED>>
             return Err(FromMklCsrError::Mkl(MklError::try_from(status).unwrap()));
         }
         let indexing = usize::try_from(unsafe { indexing.assume_init() })?;
+        debug_assert!(indexing == SPARSE_INDEX_BASE_ZERO.try_into().unwrap());
         let rows = NonZeroUsize::try_from(usize::try_from(unsafe { rows.assume_init() })?)?;
         let cols = NonZeroUsize::try_from(usize::try_from(unsafe { cols.assume_init() })?)?;
-        let mut offsets: Vec<_> =
-            unsafe { slice::from_raw_parts(rows_start.assume_init(), rows.get()) }
-                .iter()
-                .map(|i| Ok(usize::try_from(*i)? - indexing))
-                .collect::<Result<_, TryFromIntError>>()?;
-        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows.get() - 1) }.try_into()?;
+        let rows_start = unsafe { rows_start.assume_init() };
+        let rows_end = unsafe { rows_end.assume_init() };
+        let nnz = usize::try_from(unsafe { *rows_end.wrapping_add(rows.get() - 1) })?;
+        let col_indx = unsafe { col_indx.assume_init() };
+        let values = unsafe { values.assume_init() };
+
+        let mut offsets = vec![];
+        for i in 0..rows.get() {
+            offsets.push(unsafe { rows_start.wrapping_add(i).read() }.try_into()?);
+        }
         offsets.push(nnz);
-        let indices: Vec<_> = unsafe { slice::from_raw_parts(col_indx.assume_init(), nnz) }
-            .iter()
-            .map(|i| Ok(usize::try_from(*i)? - indexing))
-            .collect::<Result<_, TryFromIntError>>()?;
-        let vals = unsafe { slice::from_raw_parts(values.assume_init(), nnz) }.to_vec();
+        let mut indices = vec![];
+        for i in 0..nnz {
+            indices.push(unsafe { col_indx.wrapping_add(i).read() }.try_into()?);
+        }
+        let mut vals = vec![];
+        for i in 0..nnz {
+            vals.push(unsafe { values.wrapping_add(i).read() });
+        }
         Ok(CsrMatrix {
             rows,
             cols,
@@ -400,20 +358,28 @@ impl<const IS_SORTED: bool> TryFrom<CMklSparseMatrix<MKL_Complex16, IS_SORTED>>
             return Err(FromMklCsrError::Mkl(MklError::try_from(status).unwrap()));
         }
         let indexing = usize::try_from(unsafe { indexing.assume_init() })?;
+        debug_assert!(indexing == SPARSE_INDEX_BASE_ZERO.try_into().unwrap());
         let rows = NonZeroUsize::try_from(usize::try_from(unsafe { rows.assume_init() })?)?;
         let cols = NonZeroUsize::try_from(usize::try_from(unsafe { cols.assume_init() })?)?;
-        let mut offsets: Vec<_> =
-            unsafe { slice::from_raw_parts(rows_start.assume_init(), rows.get()) }
-                .iter()
-                .map(|i| Ok(usize::try_from(*i)? - indexing))
-                .collect::<Result<_, TryFromIntError>>()?;
-        let nnz = unsafe { *rows_end.assume_init().wrapping_add(rows.get() - 1) }.try_into()?;
+        let rows_start = unsafe { rows_start.assume_init() };
+        let rows_end = unsafe { rows_end.assume_init() };
+        let nnz = usize::try_from(unsafe { *rows_end.wrapping_add(rows.get() - 1) })?;
+        let col_indx = unsafe { col_indx.assume_init() };
+        let values = unsafe { values.assume_init() };
+
+        let mut offsets = vec![];
+        for i in 0..rows.get() {
+            offsets.push(unsafe { rows_start.wrapping_add(i).read() }.try_into()?);
+        }
         offsets.push(nnz);
-        let indices: Vec<_> = unsafe { slice::from_raw_parts(col_indx.assume_init(), nnz) }
-            .iter()
-            .map(|i| Ok(usize::try_from(*i)? - indexing))
-            .collect::<Result<_, TryFromIntError>>()?;
-        let vals = unsafe { slice::from_raw_parts(values.assume_init().cast(), nnz) }.to_vec();
+        let mut indices = vec![];
+        for i in 0..nnz {
+            indices.push(unsafe { col_indx.wrapping_add(i).read() }.try_into()?);
+        }
+        let mut vals = vec![];
+        for i in 0..nnz {
+            vals.push(unsafe { values.wrapping_add(i).read() }.into());
+        }
         Ok(CsrMatrix {
             rows,
             cols,

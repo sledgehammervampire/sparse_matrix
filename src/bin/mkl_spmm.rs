@@ -1,10 +1,14 @@
 #![cfg(feature = "mkl")]
 use num::Num;
 use open_ambient::open_ambient_dir;
-use spam::{csr_matrix::{
-        mkl::{MklCsrMatrix, RustMklSparseMatrix},
+use spam::{
+    csr_matrix::{
+        mkl::{IntoMklScalar, MklCsrMatrix, RustMklSparseMatrix},
         CsrMatrix,
-    }, dok_matrix::DokMatrix, gen_mul_main};
+    },
+    dok_matrix::DokMatrix,
+    gen_mul_main,
+};
 use std::convert::TryFrom;
 
 const ITERS: usize = 100;
@@ -17,11 +21,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn mkl_spmm<T, U>(m: DokMatrix<T>)
+fn mkl_spmm<T>(m: DokMatrix<T>)
 where
-    T: Num,
-    MklCsrMatrix<U, true>: TryFrom<CsrMatrix<T, true>>,
-    for<'a> RustMklSparseMatrix<'a, U, true>: TryFrom<&'a mut MklCsrMatrix<U, true>>,
+    T: Num + IntoMklScalar,
+    for<'a> RustMklSparseMatrix<'a, <T as IntoMklScalar>::Output, true>:
+        TryFrom<&'a mut MklCsrMatrix<<T as IntoMklScalar>::Output, true>>,
 {
     let m = CsrMatrix::from(m);
     if let Ok(mut m) = MklCsrMatrix::try_from(m) {

@@ -6,7 +6,7 @@ use spam::{
         mkl::{CMklSparseMatrix, MklCsrMatrix, RustMklSparseMatrix},
         CsrMatrix,
     },
-    MulPair,
+    Matrix, MulPair,
 };
 use std::convert::{TryFrom, TryInto};
 
@@ -24,14 +24,16 @@ fuzz_target!(|bytes| {
             m.try_into().unwrap(),
             n.try_into().unwrap(),
         ) {
-            let mut m1 = MklCsrMatrix::try_from(m1).unwrap();
-            let m1 = RustMklSparseMatrix::try_from(&mut m1).unwrap();
-            let m1 = CMklSparseMatrix::from(m1);
-            let mut m2 = MklCsrMatrix::try_from(m2).unwrap();
-            let m2 = RustMklSparseMatrix::try_from(&mut m2).unwrap();
-            let m2 = CMklSparseMatrix::from(m2);
-            let m3 = CsrMatrix::try_from((&m1 * &m2).unwrap()).unwrap();
-            assert!(m3.invariants());
+            if let (Ok(mut m1), Ok(mut m2)) =
+                (MklCsrMatrix::try_from(m1), MklCsrMatrix::try_from(m2))
+            {
+                let m1 = RustMklSparseMatrix::try_from(&mut m1).unwrap();
+                let m1 = CMklSparseMatrix::from(m1);
+                let m2 = RustMklSparseMatrix::try_from(&mut m2).unwrap();
+                let m2 = CMklSparseMatrix::from(m2);
+                let m3 = CsrMatrix::try_from((&m1 * &m2).unwrap()).unwrap();
+                assert!(m3.invariants());
+            }
         }
     }
 });

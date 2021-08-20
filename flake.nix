@@ -22,7 +22,7 @@
               {
                 buildInputs =
                   let
-                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "clippy" "miri" "rust-src" ]; });
+                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" ]; });
                   in
                     [
                       rust
