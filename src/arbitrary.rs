@@ -5,13 +5,13 @@ use num::Num;
 
 use crate::{AddPair, Matrix, MulPair};
 
-pub fn arb_fixed_size_matrix<'a, T: arbitrary::Arbitrary<'a> + Num + Clone, M: Matrix<T>>(
+pub fn arb_fixed_size_matrix<'a, T: Arbitrary<'a> + Num + Clone, M: Matrix<T>>(
     u: &mut arbitrary::Unstructured<'a>,
     rows: NonZeroUsize,
     cols: NonZeroUsize,
 ) -> arbitrary::Result<M> {
     let mut matrix = M::new((rows, cols));
-    for _ in 0..u.int_in_range(0..=2 * rows.get() * cols.get())? {
+    for _ in 0..u.int_in_range(0..=rows.get() * cols.get() + 5)? {
         let i = u.int_in_range(0..=rows.get() - 1)?;
         let j = u.int_in_range(0..=cols.get() - 1)?;
         matrix.set_element((i, j), u.arbitrary()?).unwrap();

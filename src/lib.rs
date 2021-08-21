@@ -1,5 +1,7 @@
 #![feature(allocator_api, type_alias_impl_trait, is_sorted)]
 #![deny(clippy::disallowed_method)]
+
+use derive_more::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 #[cfg(feature = "mkl")]
 use mkl_sys::MKL_Complex16;
 use num::{Complex, Num, One, Zero};
@@ -228,4 +230,65 @@ macro_rules! gen_mul_main {
             Ok(())
         }
     };
+}
+
+// f64 with Debug impl in scientific notation
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    AddAssign,
+    MulAssign,
+    RemAssign,
+    DivAssign,
+    SubAssign,
+    Add,
+    Div,
+    Sub,
+    Rem,
+    Mul,
+)]
+#[mul(forward)]
+#[mul_assign(forward)]
+#[div(forward)]
+#[div_assign(forward)]
+#[rem(forward)]
+#[rem_assign(forward)]
+pub struct SNF64(f64);
+
+impl Debug for SNF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:e}", self.0)
+    }
+}
+impl<'a> ::arbitrary::Arbitrary<'a> for SNF64 {
+    fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+        Ok(SNF64(u.arbitrary()?))
+    }
+}
+impl Num for SNF64 {
+    type FromStrRadixErr = <f64 as Num>::FromStrRadixErr;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        f64::from_str_radix(str, radix).map(SNF64)
+    }
+}
+impl Zero for SNF64 {
+    fn zero() -> Self {
+        SNF64(0.0)
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0.is_zero()
+    }
+}
+impl One for SNF64 {
+    fn one() -> Self {
+        SNF64(1.0)
+    }
+}
+impl SNF64 {
+    pub fn is_nan(self) -> bool {
+        self.0.is_nan()
+    }
 }

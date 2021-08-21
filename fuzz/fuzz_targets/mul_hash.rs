@@ -6,11 +6,11 @@ use cap_std::ambient_authority;
 use libfuzzer_sys::{arbitrary::Unstructured, fuzz_target};
 use spam::{
     arbitrary::arb_mul_pair_fixed_size, csr_matrix::CsrMatrix, dok_matrix::DokMatrix, Matrix,
-    MulPair,
+    MulPair, SNF64,
 };
 
 fuzz_target!(|bytes| {
-    const MAX_SIZE: usize = 50;
+    const MAX_SIZE: usize = 10;
 
     let ambient_authority = ambient_authority();
     let mut rng = CapRng::default(ambient_authority);
@@ -20,7 +20,7 @@ fuzz_target!(|bytes| {
         u.int_in_range(1..=MAX_SIZE),
         u.int_in_range(1..=MAX_SIZE),
     ) {
-        if let Ok(MulPair(m1, m2)) = arb_mul_pair_fixed_size::<f64, DokMatrix<f64>>(
+        if let Ok(MulPair(m1, m2)) = arb_mul_pair_fixed_size::<SNF64, DokMatrix<SNF64>>(
             &mut u,
             l.try_into().unwrap(),
             m.try_into().unwrap(),
@@ -30,6 +30,10 @@ fuzz_target!(|bytes| {
             let m4: CsrMatrix<_, false> = CsrMatrix::from_dok(m2.clone(), &mut rng);
             let m5: CsrMatrix<_, false> = m3.mul_hash(&m4);
             assert!(m5.invariants());
+            let m6 = &m1 * &m2;
+            if m5.iter().all(|(_, t)| !t.is_nan()) && m6.iter().all(|(_, t)| !t.is_nan()) {
+                assert_eq!(DokMatrix::from(m5), m6);
+            }
         }
     }
 });

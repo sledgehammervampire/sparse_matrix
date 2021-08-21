@@ -26,7 +26,7 @@ fn alloc<T>(elems: usize) -> Result<NonNull<T>, AllocationError> {
         .ok_or(AllocationError::WouldOverflow)?
         .try_into()?;
     if size == 0 {
-        return Err(AllocationError::ZeroSized);
+        Err(AllocationError::ZeroSized)
     } else {
         NonNull::new(unsafe { MKL_malloc(size, MKL_ALIGN) }.cast())
             .ok_or(AllocationError::AllocationFailed)

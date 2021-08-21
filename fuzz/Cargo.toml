@@ -10,8 +10,8 @@ edition = "2018"
 cargo-fuzz = true
 
 [dependencies]
-cap-rand = "0.16.3"
-cap-std = "0.16.3"
+cap-rand = "0.17.0"
+cap-std = "0.17.0"
 libfuzzer-sys = "0.4"
 proptest = "1.0.0"
 

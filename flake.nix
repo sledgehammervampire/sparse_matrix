@@ -22,7 +22,7 @@
               {
                 buildInputs =
                   let
-                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" ]; });
+                    rust = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
                   in
                     [
                       rust
