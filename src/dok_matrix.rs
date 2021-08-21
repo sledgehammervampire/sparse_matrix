@@ -263,12 +263,6 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
             char(' '),
             alt((tag("integer"), tag("real"), tag("complex"), tag("pattern"))),
         )(input)?;
-        let entry_type = match entry_type {
-            "integer" => Integer(BTreeMap::new()),
-            "real" => Real(BTreeMap::new()),
-            "complex" => Complex(BTreeMap::new()),
-            _ => todo!("entry type {} unsupported", entry_type),
-        };
         let (input, shape) = delimited(
             char(' '),
             alt((
@@ -288,8 +282,8 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
         let (input, _) = many0(delimited(char('%'), not_line_ending, line_ending))(input)?;
         let (input, (rows, cols)) = matrix_size(input)?;
 
-        match (entry_type, shape) {
-            (Integer(entries), General) => {
+        match entry_type {
+            "integer" => {
                 let (input, entries) = fold_many0(
                     map(
                         tuple({
@@ -304,32 +298,15 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                         }),
                         |(r, _, c, _, e, _)| (r, c, e),
                     ),
-                    entries,
-                    general,
+                    BTreeMap::new,
+                    match shape {
+                        General => general,
+                        Symmetric => symmetric,
+                    },
                 )(input)?;
                 Ok((input, (rows, cols, Integer(entries))))
             }
-            (Integer(entries), Symmetric) => {
-                let (input, entries) = fold_many0(
-                    map(
-                        tuple({
-                            (
-                                parse_usize,
-                                char(' '),
-                                parse_usize,
-                                char(' '),
-                                map_res(recognize_int::<I>, str::parse),
-                                line_ending,
-                            )
-                        }),
-                        |(r, _, c, _, e, _)| (r, c, e),
-                    ),
-                    entries,
-                    symmetric,
-                )(input)?;
-                Ok((input, (rows, cols, Integer(entries))))
-            }
-            (Real(entries), General) => {
+            "real" => {
                 let (input, entries) = fold_many0(
                     map(
                         tuple({
@@ -344,32 +321,15 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                         }),
                         |(r, _, c, _, e, _)| (r, c, e),
                     ),
-                    entries,
-                    general,
+                    BTreeMap::new,
+                    match shape {
+                        General => general,
+                        Symmetric => symmetric,
+                    },
                 )(input)?;
                 Ok((input, (rows, cols, Real(entries))))
             }
-            (Real(entries), Symmetric) => {
-                let (input, entries) = fold_many0(
-                    map(
-                        tuple({
-                            (
-                                parse_usize,
-                                char(' '),
-                                parse_usize,
-                                char(' '),
-                                map_res(recognize_float, str::parse),
-                                line_ending,
-                            )
-                        }),
-                        |(r, _, c, _, e, _)| (r, c, e),
-                    ),
-                    entries,
-                    symmetric,
-                )(input)?;
-                Ok((input, (rows, cols, Real(entries))))
-            }
-            (Complex(entries), General) => {
+            "complex" => {
                 let (input, entries) = fold_many0(
                     map(
                         tuple((
@@ -386,33 +346,12 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
                             (r, c, ComplexNewtype(num::complex::Complex { re, im }))
                         },
                     ),
-                    entries,
+                    BTreeMap::new,
                     general,
                 )(input)?;
                 Ok((input, (rows, cols, Complex(entries))))
             }
-            (Complex(entries), Symmetric) => {
-                let (input, entries) = fold_many0(
-                    map(
-                        tuple((
-                            parse_usize,
-                            char(' '),
-                            parse_usize,
-                            char(' '),
-                            map_res(recognize_float, str::parse),
-                            char(' '),
-                            map_res(recognize_float, str::parse),
-                            line_ending,
-                        )),
-                        |(r, _, c, _, re, _, im, _)| {
-                            (r, c, ComplexNewtype(num::complex::Complex { re, im }))
-                        },
-                    ),
-                    entries,
-                    symmetric,
-                )(input)?;
-                Ok((input, (rows, cols, Complex(entries))))
-            }
+            _ => todo!("entry type {} unsupported", entry_type),
         }
     }
 
