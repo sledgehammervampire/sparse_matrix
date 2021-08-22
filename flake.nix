@@ -4,11 +4,10 @@
   inputs = {
     nixpkgs.url = github:1000teslas/nixpkgs/rust-demangle-hotspot;
     flake-utils.url = github:numtide/flake-utils;
-    prusti-dev.url = github:1000teslas/prusti-dev;
     rust-overlay.url = github:oxalica/rust-overlay;
   };
 
-  outputs = { self, nixpkgs, flake-utils, prusti-dev, rust-overlay }: flake-utils.lib.eachDefaultSystem (
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }: flake-utils.lib.eachDefaultSystem (
     system:
       let
         overlays = [
@@ -22,7 +21,8 @@
               {
                 buildInputs =
                   let
-                    rust = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+                    # rust = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" "miri" ]; });
                   in
                     [
                       rust
@@ -43,6 +43,7 @@
                       linuxPackages.perf
                       cargo-geiger
                       cargo-criterion
+                      cargo-bloat
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib

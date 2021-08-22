@@ -1,4 +1,3 @@
-#![cfg(feature = "mkl")]
 use num::Num;
 use open_ambient::open_ambient_dir;
 use spam::{
@@ -15,7 +14,7 @@ const ITERS: usize = 100;
 
 gen_mul_main!(mkl_spmm);
 
-fn main() -> anyhow::Result<()> {
+pub fn main() -> anyhow::Result<()> {
     let dir = open_ambient_dir!("matrices")?;
     mul_main(dir)?;
     Ok(())

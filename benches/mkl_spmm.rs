@@ -11,10 +11,9 @@ use spam::{
     dok_matrix::{parse_matrix_market, MatrixType},
 };
 
-fn main() -> anyhow::Result<()> {
+pub fn main() -> anyhow::Result<()> {
     let dir = open_ambient_dir!("matrices")?;
     bench_mul(dir)?;
-
     Ok(())
 }
 
