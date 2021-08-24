@@ -5,7 +5,7 @@ use num::Num;
 use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
-    ops::{Add, Mul},
+    ops::{Add, Mul, Sub},
     str::FromStr,
 };
 use thiserror::Error;
@@ -22,6 +22,25 @@ impl<T: Num> DokMatrix<T> {
     // output entries with (row, col) lexicographically ordered
     pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
         self.entries.iter().map(|(&p, t)| (p, t))
+    }
+    fn apply_elementwise<F>(self, rhs: Self, f: &F) -> Self
+    where
+        F: Fn(T, T) -> T,
+    {
+        use itertools::EitherOrBoth::*;
+        let mut m = DokMatrix::new((self.rows(), self.cols()));
+        self.entries
+            .into_iter()
+            .merge_join_by(rhs.entries, |e1, e2| e1.0.cmp(&e2.0))
+            .map(|eob| match eob {
+                Both((p, t1), (_, t2)) => (p, f(t1, t2)),
+                Left((p, t)) => (p, f(t, T::zero())),
+                Right((p, t)) => (p, f(T::zero(), t)),
+            })
+            .for_each(|(pos, t)| {
+                m.set_element(pos, t).unwrap();
+            });
+        m
     }
 }
 
@@ -98,27 +117,14 @@ impl<T: Num> Add for DokMatrix<T> {
     type Output = DokMatrix<T>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        DokMatrix {
-            rows: self.rows,
-            cols: self.cols,
-            entries: self
-                .entries
-                .into_iter()
-                .merge_join_by(rhs.entries, |e1, e2| e1.0.cmp(&e2.0))
-                .filter_map(|eob| match eob {
-                    itertools::EitherOrBoth::Both((p, t1), (_, t2)) => {
-                        let t = t1 + t2;
-                        if t.is_zero() {
-                            None
-                        } else {
-                            Some((p, t))
-                        }
-                    }
-                    itertools::EitherOrBoth::Left((p, t))
-                    | itertools::EitherOrBoth::Right((p, t)) => Some((p, t)),
-                })
-                .collect(),
-        }
+        self.apply_elementwise(rhs, &T::add)
+    }
+}
+impl<T: Num> Sub for DokMatrix<T> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.apply_elementwise(rhs, &T::sub)
     }
 }
 
@@ -128,7 +134,7 @@ impl<T: Num + Clone> Mul for &DokMatrix<T> {
     fn mul(self, rhs: Self) -> Self::Output {
         assert_eq!(self.cols, rhs.rows, "LHS cols != RHS rows");
 
-        let mut entries = BTreeMap::new();
+        let mut m = DokMatrix::new((self.rows(), rhs.cols()));
         for i in 0..self.rows.get() {
             for j in 0..rhs.cols.get() {
                 let mut t = T::zero();
@@ -144,17 +150,10 @@ impl<T: Num + Clone> Mul for &DokMatrix<T> {
                             .cloned()
                             .unwrap_or_else(T::zero);
                 }
-                if !t.is_zero() {
-                    entries.insert((i, j), t);
-                }
+                m.set_element((i, j), t).unwrap();
             }
         }
-
-        DokMatrix {
-            entries,
-            rows: self.rows,
-            cols: rhs.cols,
-        }
+        m
     }
 }
 
@@ -171,10 +170,10 @@ impl<T: Num, const IS_SORTED: bool> From<CsrMatrix<T, IS_SORTED>> for DokMatrix<
     }
 }
 
-pub enum MatrixType<I, R> {
+pub enum MatrixType<I, F> {
     Integer(DokMatrix<I>),
-    Real(DokMatrix<R>),
-    Complex(DokMatrix<ComplexNewtype<R>>),
+    Real(DokMatrix<F>),
+    Complex(DokMatrix<ComplexNewtype<F>>),
 }
 
 #[derive(Error, Debug)]
@@ -185,18 +184,18 @@ pub enum FromMatrixMarketError {
     HasZeroDimension,
 }
 
-pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
+pub fn parse_matrix_market<I: FromStr + num::Integer + Clone, F: FromStr + num::Float + Clone>(
     input: &str,
-) -> Result<MatrixType<I, R>, FromMatrixMarketError> {
-    enum EntryType<I, R> {
+) -> Result<MatrixType<I, F>, FromMatrixMarketError> {
+    enum EntryType<I, F> {
         Integer(BTreeMap<(usize, usize), I>),
-        Real(BTreeMap<(usize, usize), R>),
-        Complex(BTreeMap<(usize, usize), ComplexNewtype<R>>),
+        Real(BTreeMap<(usize, usize), F>),
+        Complex(BTreeMap<(usize, usize), ComplexNewtype<F>>),
     }
 
-    fn inner<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
+    fn inner<I: FromStr + Num + Clone, F: FromStr + Num + Clone>(
         input: &str,
-    ) -> IResult<&str, (usize, usize, EntryType<I, R>)> {
+    ) -> IResult<&str, (usize, usize, EntryType<I, F>)> {
         use nom::{
             branch::alt,
             bytes::complete::tag,
@@ -383,4 +382,17 @@ pub fn parse_matrix_market<I: FromStr + Num + Clone, R: FromStr + Num + Clone>(
             entries,
         })),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn into_float_matrix_market<F: num::Float + std::fmt::Display, W: std::fmt::Write>(
+    m: DokMatrix<F>,
+    w: &mut W,
+) -> Result<(), std::fmt::Error> {
+    writeln!(w, "%%MatrixMarket matrix coordinate real general")?;
+    writeln!(w, "{} {} {}", m.rows(), m.cols(), m.nnz())?;
+    for ((i, j), t) in m.entries {
+        writeln!(w, "{} {} {}", i + 1, j + 1, t)?;
+    }
+    Ok(())
 }

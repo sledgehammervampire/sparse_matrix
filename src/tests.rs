@@ -9,7 +9,7 @@ mod dok {
 
     use crate::{
         csr_matrix::CsrMatrix,
-        dok_matrix::{parse_matrix_market, DokMatrix, MatrixType},
+        dok_matrix::{into_float_matrix_market, parse_matrix_market, DokMatrix, MatrixType},
         proptest::{arb_add_pair, arb_mul_pair},
         AddPair, Matrix, MulPair,
     };
@@ -94,6 +94,23 @@ mod dok {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_into_float_matrix_market() {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&DokMatrix::<f64>::arb_matrix(), |m| {
+                let mut ser = String::new();
+                into_float_matrix_market(m.clone(), &mut ser).unwrap();
+                if let MatrixType::Real(m1) = parse_matrix_market::<i64, f64>(&ser).unwrap() {
+                    assert_eq!(m, m1);
+                } else {
+                    unreachable!();
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     // inductive cases
