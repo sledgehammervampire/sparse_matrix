@@ -150,7 +150,9 @@ mod dok {
                 )
             }),
             |(mut m, i, j, t)| {
-                m.set_element((i, j), t).unwrap();
+                let t_old = m.get_element((i, j)).unwrap().cloned();
+                let t1_old = m.set_element((i, j), t).unwrap();
+                assert_eq!(t_old, t1_old);
                 m
             },
         );
@@ -367,32 +369,31 @@ mod csr {
                 any::<i8>(),
             )
         });
-        let dok_val = |(mut m, i, j, t): (DokMatrix<_>, _, _, _)| {
-            m.set_element((i, j), t).unwrap();
-            m
-        };
-        test_commutes(
-            &strategy,
-            dok_val,
-            |(m, i, j, t)| {
+        let mut runner = TestRunner::default();
+        runner
+            .run(&strategy, |(mut m, i, j, t)| {
                 let ambient_authority = ambient_authority();
                 let mut rng = CapRng::default(ambient_authority);
-                let mut m1 = CsrMatrix::from_dok(m, &mut rng);
-                m1.set_element((i, j), t).unwrap();
-                m1
-            },
-            DokMatrix::from,
-        );
-        test_commutes(
-            &strategy,
-            dok_val,
-            |(m, i, j, t)| {
-                let mut m1 = CsrMatrix::from(m);
-                m1.set_element((i, j), t).unwrap();
-                m1
-            },
-            DokMatrix::from,
-        );
+                let mut m1 = CsrMatrix::from_dok(m.clone(), &mut rng);
+                let t1_old = m1.set_element((i, j), t).unwrap();
+                assert!(m1.invariants());
+                let t_old = m.set_element((i, j), t).unwrap();
+                assert_eq!(m, DokMatrix::from(m1));
+                assert_eq!(t_old, t1_old);
+                Ok(())
+            })
+            .unwrap();
+        runner
+            .run(&strategy, |(mut m, i, j, t)| {
+                let mut m1 = CsrMatrix::from(m.clone());
+                let t1_old = m1.set_element((i, j), t).unwrap();
+                assert!(m1.invariants());
+                let t_old = m.set_element((i, j), t).unwrap();
+                assert_eq!(m, DokMatrix::from(m1));
+                assert_eq!(t_old, t1_old);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
