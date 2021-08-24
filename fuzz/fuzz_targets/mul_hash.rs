@@ -1,12 +1,12 @@
 #![no_main]
-use std::convert::TryInto;
+use std::{convert::TryInto, num::Wrapping};
 
 use cap_rand::prelude::CapRng;
 use cap_std::ambient_authority;
 use libfuzzer_sys::{arbitrary::Unstructured, fuzz_target};
 use spam::{
     arbitrary::arb_mul_pair_fixed_size, csr_matrix::CsrMatrix, dok_matrix::DokMatrix, Matrix,
-    MulPair, SNF64,
+    MulPair,
 };
 
 fuzz_target!(|bytes| {
@@ -20,20 +20,20 @@ fuzz_target!(|bytes| {
         u.int_in_range(1..=MAX_SIZE),
         u.int_in_range(1..=MAX_SIZE),
     ) {
-        if let Ok(MulPair(m1, m2)) = arb_mul_pair_fixed_size::<SNF64, DokMatrix<SNF64>>(
-            &mut u,
-            l.try_into().unwrap(),
-            m.try_into().unwrap(),
-            n.try_into().unwrap(),
-        ) {
+        if let Ok(MulPair(m1, m2)) =
+            arb_mul_pair_fixed_size::<Wrapping<i8>, DokMatrix<Wrapping<i8>>>(
+                &mut u,
+                l.try_into().unwrap(),
+                m.try_into().unwrap(),
+                n.try_into().unwrap(),
+            )
+        {
             let m3: CsrMatrix<_, false> = CsrMatrix::from_dok(m1.clone(), &mut rng);
             let m4: CsrMatrix<_, false> = CsrMatrix::from_dok(m2.clone(), &mut rng);
             let m5: CsrMatrix<_, false> = m3.mul_hash(&m4);
             assert!(m5.invariants());
             let m6 = &m1 * &m2;
-            if m5.iter().all(|(_, t)| !t.is_nan()) && m6.iter().all(|(_, t)| !t.is_nan()) {
-                assert_eq!(DokMatrix::from(m5), m6);
-            }
+            assert_eq!(DokMatrix::from(m5), m6);
         }
     }
 });
