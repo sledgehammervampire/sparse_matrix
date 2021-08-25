@@ -1,18 +1,15 @@
 use cap_std::fs::Dir;
 use criterion::Criterion;
 use open_ambient::open_ambient_dir;
+use spam_csr::{
+    mkl::{MklCsrMatrix, RustMklSparseMatrix},
+    CsrMatrix,
+};
+use spam_dok::{parse_matrix_market, MatrixType};
 use std::{convert::TryFrom, io::Read};
 
-use spam::{
-    csr_matrix::{
-        mkl::{MklCsrMatrix, RustMklSparseMatrix},
-        CsrMatrix,
-    },
-    dok_matrix::{parse_matrix_market, MatrixType},
-};
-
 pub fn main() -> anyhow::Result<()> {
-    let dir = open_ambient_dir!("matrices")?;
+    let dir = open_ambient_dir!("../matrices")?;
     bench_mul(dir)?;
     Ok(())
 }

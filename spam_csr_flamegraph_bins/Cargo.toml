@@ -1,0 +1,27 @@
+[package]
+name = "spam_csr_flamegraph_bins"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+mkl = ["spam_csr/mkl"]
+
+[dependencies]
+spam_dok = { path = "../spam_dok" }
+spam_csr = { path = "../spam_csr" }
+open-ambient = "0.0.1"
+num = "0.4.0"
+anyhow = "1.0.43"
+cap-std = "0.17.0"
+
+[profile.release]
+debug = true
+
+[[bin]]
+name = "mul_hash"
+
+[[bin]]
+name = "mkl_spmm"
+required-features = ["mkl"]

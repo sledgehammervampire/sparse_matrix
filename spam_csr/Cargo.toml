@@ -5,7 +5,7 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["mkl"]
+default = []
 mkl = ["mkl-sys", "num_enum", "cmplx", "cmplx/mkl", "thiserror"]
 
 [dependencies]
@@ -24,7 +24,18 @@ thiserror = { version = "1.0.26", optional = true }
 [dev-dependencies]
 cap-rand = "0.17.0"
 cap-std = "0.17.0"
-open-ambient = "0.0.1"
 proptest = "1.0.0"
 spam_dok = { path = "../spam_dok", features = ["proptest-arbitrary"] }
 cmplx = { path = "../cmplx", features = ["proptest"] }
+anyhow = "1.0.43"
+criterion = "0.3.5"
+open-ambient = "0.0.1"
+
+[[bench]]
+name = "mul_hash"
+harness = false
+
+[[bench]]
+name = "mkl_spmm"
+harness = false
+required-features = ["mkl"]
