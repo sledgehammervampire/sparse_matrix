@@ -1,0 +1,30 @@
+[package]
+name = "spam_csr"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["mkl"]
+mkl = ["mkl-sys", "num_enum", "cmplx", "cmplx/mkl", "thiserror"]
+
+[dependencies]
+cmplx = { path = "../cmplx", optional = true }
+spam_matrix = { path = "../spam_matrix" }
+linprobe = { path = "../linprobe" }
+spam_dok = { path = "../spam_dok" }
+itertools = "0.10.1"
+num = "0.4.0"
+rayon = "1.5.1"
+num_cpus = "1.13.0"
+mkl-sys = { git = "https://github.com/Andlon/mkl-sys", version = "0.1.0", optional = true, features = ["all", "openmp", "ilp64"] }
+num_enum = { version = "0.5.4", optional = true }
+thiserror = { version = "1.0.26", optional = true }
+
+[dev-dependencies]
+cap-rand = "0.17.0"
+cap-std = "0.17.0"
+open-ambient = "0.0.1"
+proptest = "1.0.0"
+spam_dok = { path = "../spam_dok", features = ["proptest-arbitrary"] }
+cmplx = { path = "../cmplx", features = ["proptest"] }
