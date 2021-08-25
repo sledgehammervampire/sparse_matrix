@@ -1,4 +1,5 @@
 #![feature(allocator_api)]
+#![deny(clippy::disallowed_method)]
 
 use std::{
     alloc::{Allocator, Global},
@@ -52,6 +53,9 @@ impl<A: Allocator> HashSet<A> {
                 hash = (hash + 1) & (self.capacity - 1);
             }
         }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.items == 0
     }
     pub fn len(&self) -> usize {
         self.items

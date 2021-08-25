@@ -1,3 +1,5 @@
+#![deny(clippy::disallowed_method)]
+
 use std::fmt::{Debug, LowerExp};
 
 use derive_more::{

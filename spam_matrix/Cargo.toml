@@ -1,5 +1,5 @@
 [package]
-name = "spam-matrix"
+name = "spam_matrix"
 version = "0.1.0"
 authors = ["Kevin Tran <kevintran@airmail.cc>"]
 edition = "2018"

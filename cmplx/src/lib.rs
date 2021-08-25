@@ -1,4 +1,6 @@
 #![feature(type_alias_impl_trait)]
+#![deny(clippy::disallowed_method)]
+
 use derive_more::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
@@ -8,7 +10,6 @@ use num::{traits::NumAssign, Complex, Num, One, Zero};
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 
-#[repr(C)]
 #[derive(
     Debug,
     Clone,
@@ -33,7 +34,7 @@ use proptest::prelude::*;
 #[div_assign(forward)]
 #[rem(forward)]
 #[rem_assign(forward)]
-pub struct ComplexNewtype<T: NumAssign + Clone>(Complex<T>);
+pub struct ComplexNewtype<T: NumAssign + Clone>(pub Complex<T>);
 
 impl<T: NumAssign + Clone> Num for ComplexNewtype<T> {
     type FromStrRadixErr = <Complex<T> as Num>::FromStrRadixErr;
