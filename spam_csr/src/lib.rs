@@ -294,9 +294,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
     ) -> CsrMatrix<T, B2> {
         let (mut row_nz, rows_offset) = self.rows_to_threads(rhs);
         Self::mul_hash_symbolic(self, rhs, &mut row_nz, &rows_offset);
-        let offsets = checked_inclusive_scan(&row_nz);
-        let (indices, vals) =
-            Self::mul_hash_numeric::<B1, B2>(self, rhs, &row_nz, &rows_offset, &offsets);
+        let (indices, vals, offsets) =
+            unsafe { Self::mul_hash_numeric::<B1, B2>(self, rhs, &row_nz, &rows_offset) };
         CsrMatrix {
             rows: self.rows,
             cols: rhs.cols,
@@ -384,13 +383,18 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
         });
     }
 
-    fn mul_hash_numeric<const B1: bool, const B2: bool>(
+    #[allow(unused_unsafe)]
+    unsafe fn mul_hash_numeric<const B1: bool, const B2: bool>(
         &self,
         rhs: &CsrMatrix<T, B1>,
         row_nz: &[usize],
         rows_offset: &[usize],
-        offsets: &[usize],
-    ) -> (Vec<usize>, Vec<T>) {
+    ) -> (Vec<usize>, Vec<T>, Vec<usize>) {
+        debug_assert_eq!(*rows_offset.first().unwrap(), 0);
+        debug_assert_eq!(*rows_offset.last().unwrap(), self.rows().get());
+        debug_assert!(rows_offset.is_sorted());
+
+        let offsets = checked_inclusive_scan(row_nz);
         let nnz = *offsets.last().unwrap();
         let (mut indices, mut vals) = (Vec::with_capacity(nnz), Vec::with_capacity(nnz));
         rayon::scope(|s| {
@@ -414,6 +418,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                 indices_rest = s2;
                 let (tvals, s2) = vals_rest.split_at_mut(offsets[thi] - offsets[tlo]);
                 vals_rest = s2;
+                let offsets = &offsets;
                 s.spawn(move |_| {
                     // maximum of per row capacity
                     let capacity = trow_nz
@@ -485,6 +490,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                             }
                         }
                     }
+                    assert_eq!(curr, offsets[thi] - offsets[tlo]);
                 });
             }
         });
@@ -494,7 +500,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
             indices.set_len(indices.capacity());
             vals.set_len(vals.capacity());
         }
-        (indices, vals)
+        (indices, vals, offsets)
     }
 }
 
