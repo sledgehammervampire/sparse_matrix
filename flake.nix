@@ -44,6 +44,7 @@
                       cargo-geiger
                       cargo-criterion
                       cargo-bloat
+                      cargo-udeps
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib

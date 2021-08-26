@@ -30,7 +30,7 @@ use num::{Num, NumCast, One, ToPrimitive, Zero};
 #[div_assign(forward)]
 #[rem(forward)]
 #[rem_assign(forward)]
-pub struct Sci<F>(F);
+pub struct Sci<F>(pub F);
 
 impl<F: LowerExp> Debug for Sci<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

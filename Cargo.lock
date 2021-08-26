@@ -1223,6 +1223,7 @@ dependencies = [
  "open-ambient",
  "proptest",
  "rayon",
+ "spam_csr",
  "spam_dok",
  "spam_matrix",
  "thiserror",

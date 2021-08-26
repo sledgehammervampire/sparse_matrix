@@ -28,39 +28,6 @@ use crate::CsrMatrix;
 
 const MAX_SIZE: usize = 10;
 
-impl<T: Num, const IS_SORTED: bool> From<CsrMatrix<T, IS_SORTED>> for DokMatrix<T> {
-    fn from(old: CsrMatrix<T, IS_SORTED>) -> Self {
-        let mut m = DokMatrix::new((old.rows(), old.cols()));
-        for (i, t) in old.into_iter() {
-            m.set_element(i, t).unwrap();
-        }
-        m
-    }
-}
-
-impl<T: Num> CsrMatrix<T, false> {
-    pub fn from_dok(old: DokMatrix<T>, rng: &mut CapRng) -> Self {
-        let (rows, cols) = (old.rows(), old.cols());
-        let mut entries: Vec<_> = old.into_iter().collect();
-        entries.shuffle(rng);
-        entries.sort_unstable_by_key(|((i, _), _)| *i);
-        let (mut vals, mut indices, mut offsets) = (vec![], vec![], vec![]);
-        for ((i, j), t) in entries {
-            offsets.extend(std::iter::repeat(vals.len()).take(i + 1 - offsets.len()));
-            vals.push(t);
-            indices.push(j);
-        }
-        offsets.extend(std::iter::repeat(vals.len()).take(rows.get() + 1 - offsets.len()));
-        CsrMatrix {
-            rows,
-            cols,
-            vals,
-            indices,
-            offsets,
-        }
-    }
-}
-
 impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
     fn arb_fixed_size_matrix(
         rows: NonZeroUsize,

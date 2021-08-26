@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = []
 mkl = ["mkl-sys", "num_enum", "cmplx", "cmplx/mkl", "thiserror"]
+test = ["cap-rand"]
 
 [dependencies]
 cmplx = { path = "../cmplx", optional = true }
@@ -20,6 +21,7 @@ num_cpus = "1.13.0"
 mkl-sys = { git = "https://github.com/Andlon/mkl-sys", version = "0.1.0", optional = true, features = ["all", "openmp", "ilp64"] }
 num_enum = { version = "0.5.4", optional = true }
 thiserror = { version = "1.0.26", optional = true }
+cap-rand = { version = "0.17.0", optional = true }
 
 [dev-dependencies]
 cap-rand = "0.17.0"
@@ -30,6 +32,7 @@ cmplx = { path = "../cmplx", features = ["proptest"] }
 anyhow = "1.0.43"
 criterion = "0.3.5"
 open-ambient = "0.0.1"
+spam_csr = { path = ".", features = ["test"] }
 
 [[bench]]
 name = "mul_hash"
