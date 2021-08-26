@@ -393,6 +393,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
         debug_assert_eq!(*rows_offset.first().unwrap(), 0);
         debug_assert_eq!(*rows_offset.last().unwrap(), self.rows().get());
         debug_assert!(rows_offset.is_sorted());
+        debug_assert_eq!(row_nz.len(), self.rows.get());
 
         let offsets = checked_inclusive_scan(row_nz);
         let nnz = *offsets.last().unwrap();

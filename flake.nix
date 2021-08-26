@@ -22,7 +22,7 @@
                 buildInputs =
                   let
                     # rust = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" "miri" ]; });
+                    rust = rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override { extensions = [ "rust-src" "miri" "llvm-tools-preview" ]; });
                   in
                     [
                       rust
