@@ -1,5 +1,6 @@
 #![cfg_attr(test, feature(no_coverage, type_alias_impl_trait))]
-#![feature(allocator_api, is_sorted)]
+#![feature(allocator_api)]
+#![feature(is_sorted)]
 #![deny(clippy::disallowed_method)]
 
 use std::{fmt::Debug, num::NonZeroUsize};

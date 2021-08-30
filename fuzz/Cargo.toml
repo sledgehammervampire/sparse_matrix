@@ -13,7 +13,6 @@ cargo-fuzz = true
 spam_csr = { path = "../spam_csr", features = ["test", "mkl"] }
 spam_dok = { path = "../spam_dok" }
 spam_matrix = { path = "../spam_matrix", features = ["arbitrary"] }
-sci = { path = "../sci" }
 cap-rand = "0.17.0"
 cap-std = "0.17.0"
 libfuzzer-sys = "0.4"

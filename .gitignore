@@ -15,4 +15,4 @@ matrices
 *.data.old
 *.svg
 /.direnv
-/.vscode
+**/.vscode

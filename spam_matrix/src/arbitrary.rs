@@ -28,7 +28,7 @@ pub fn arb_add_pair_fixed_size<'a, T: Arbitrary<'a>, M: Matrix<T>>(
     Ok(AddPair(m1, m2))
 }
 
-pub fn arb_mul_pair_fixed_size<'a, T: Arbitrary<'a> , M: Matrix<T>>(
+pub fn arb_mul_pair_fixed_size<'a, T: Arbitrary<'a>, M: Matrix<T>>(
     u: &mut Unstructured<'a>,
     l: NonZeroUsize,
     m: NonZeroUsize,

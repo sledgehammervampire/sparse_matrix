@@ -11,6 +11,7 @@ mkl = ["spam_csr/mkl"]
 [dependencies]
 spam_dok = { path = "../spam_dok" }
 spam_csr = { path = "../spam_csr" }
+spam_matrix = { path = "../spam_matrix" }
 open-ambient = "0.0.1"
 num = "0.4.0"
 anyhow = "1.0.43"
@@ -25,3 +26,6 @@ name = "mul_hash"
 [[bin]]
 name = "mkl_spmm"
 required-features = ["mkl"]
+
+[profile.dev.package.bindgen]
+opt-level = 2

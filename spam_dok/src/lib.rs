@@ -1,12 +1,16 @@
 #![feature(type_alias_impl_trait)]
+#![cfg_attr(test, feature(no_coverage))]
 #![deny(clippy::disallowed_method)]
 
 use cmplx::ComplexNewtype;
+use conv::prelude::*;
 use itertools::Itertools;
 use nom::{Finish, IResult};
 use num::{traits::NumAssign, Num};
 #[cfg(feature = "proptest-arbitrary")]
 use proptest::prelude::*;
+#[cfg(test)]
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest-arbitrary")]
 use spam_matrix::proptest::arb_matrix;
 use spam_matrix::{IndexError, Matrix};
@@ -22,6 +26,7 @@ use thiserror::Error;
 mod tests;
 
 // a dumb matrix implementation to test against
+#[cfg_attr(test, derive(Deserialize, Serialize))]
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct DokMatrix<T> {
     rows: NonZeroUsize,
@@ -29,21 +34,63 @@ pub struct DokMatrix<T> {
     entries: BTreeMap<(usize, usize), T>,
 }
 
-impl<T: num::Float + Clone + PartialOrd> DokMatrix<T> {
-    pub fn approx_eq(&self, rhs: &Self) -> bool {
-        let rhs_norm = rhs
-            .iter()
-            .map(|(_, t)| t.abs())
-            .max_by(|x, y| x.partial_cmp(y).unwrap())
-            .unwrap_or_else(T::zero);
-        let diff_norm = (self.clone() - rhs.clone())
-            .iter()
-            .map(|(_, t)| t.abs())
-            .max_by(|x, y| x.partial_cmp(y).unwrap())
-            .unwrap_or_else(T::zero);
-        diff_norm / rhs_norm < T::epsilon()
+impl DokMatrix<f64> {
+    pub fn debug_in_scientific_notation(&self) -> String {
+        let mut s = String::from("{");
+        s.push_str(
+            &self
+                .iter()
+                .map(|((i, j), t)| format!("({}, {}, {:e})", i, j, t))
+                .join(", "),
+        );
+        s.push_str("}");
+        s
     }
 }
+
+#[derive(Debug)]
+pub struct IsNan;
+impl DokMatrix<f64> {
+    // see (3.13) from Accuracy and stability of numerical algorithms by Higham
+    pub fn good_matrix_approx(&self, rhs: &Self, approx: &Self) -> Result<bool, IsNan> {
+        let inf_norm = |m: &DokMatrix<f64>| {
+            let mut max = 0.0;
+            for rsum in (0..m.rows().get()).map(|r| {
+                m.entries
+                    .range((r, 0)..(r + 1, 0))
+                    .map(|(_, t)| t.abs())
+                    .sum::<f64>()
+            }) {
+                if rsum.is_nan() {
+                    return Err(IsNan);
+                } else if rsum > max {
+                    max = rsum;
+                }
+            }
+            Ok(max)
+        };
+        let n = f64::value_from(self.rows().get().max(self.cols().get())).unwrap();
+        let u = f64::EPSILON / 2.0;
+        let gamma = n * u / (1.0 - n * u);
+        let expected = self * rhs;
+        if expected.iter().all(|(_, t)| !t.is_nan()) && approx.iter().any(|(_, t)| t.is_nan()) {
+            Ok(false)
+        } else {
+            let self_norm = inf_norm(self)?;
+            let rhs_norm = inf_norm(rhs)?;
+            Ok(inf_norm(&(expected - approx.clone()))?
+                <= 2.0
+                    * gamma
+                    * if self_norm == 0.0 || rhs_norm == 0.0 {
+                        // don't want 0.0*inf to become NaN
+                        0.0
+                    } else {
+                        self_norm * rhs_norm
+                    })
+        }
+    }
+}
+
 impl<T: Num> DokMatrix<T> {
     // output entries with (row, col) lexicographically ordered
     pub fn iter(&self) -> impl Iterator<Item = ((usize, usize), &T)> {
@@ -431,8 +478,7 @@ pub fn parse_matrix_market<I: FromStr + num::Integer + Clone, F: FromStr + NumAs
     }
 }
 
-#[cfg(test)]
-fn into_float_matrix_market<F: num::Float + std::fmt::Display, W: std::fmt::Write>(
+pub fn into_float_matrix_market<F: num::Float + std::fmt::Display, W: std::fmt::Write>(
     m: DokMatrix<F>,
     w: &mut W,
 ) -> Result<(), std::fmt::Error> {

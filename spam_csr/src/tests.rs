@@ -29,7 +29,7 @@ use crate::CsrMatrix;
 const MAX_SIZE: usize = 10;
 
 impl<T: proptest::arbitrary::Arbitrary + Num> CsrMatrix<T, false> {
-    fn arb_fixed_size_matrix(
+    pub(crate) fn arb_fixed_size_matrix(
         rows: NonZeroUsize,
         cols: NonZeroUsize,
     ) -> impl proptest::strategy::Strategy<Value = Self> {
@@ -475,26 +475,5 @@ fn test_into_iter() {
             );
             Ok(())
         })
-        .unwrap();
-}
-
-#[test]
-fn test_rows_to_threads() {
-    use proptest::{prelude::*, test_runner::TestRunner};
-    use spam_matrix::{proptest::arb_mul_pair, MulPair};
-    let mut runner = TestRunner::default();
-    runner
-        .run(
-            &arb_mul_pair::<std::num::Wrapping<i8>, _, _>(
-                CsrMatrix::<_, false>::arb_fixed_size_matrix,
-            ),
-            |MulPair(m1, m2)| {
-                let (flop, offsets) = m1.rows_to_threads(&m2);
-                prop_assert!(flop.len() == m1.rows().get());
-                prop_assert!(offsets.is_sorted(), "{:?}", offsets);
-                prop_assert!(*offsets.last().unwrap() == m1.rows().get(), "{:?}", offsets);
-                Ok(())
-            },
-        )
         .unwrap();
 }

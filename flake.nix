@@ -2,7 +2,7 @@
   description = "A very basic flake";
 
   inputs = {
-    nixpkgs.url = github:1000teslas/nixpkgs/rust-demangle-hotspot;
+    nixpkgs.url = path:../nixpkgs;
     flake-utils.url = github:numtide/flake-utils;
     rust-overlay.url = github:oxalica/rust-overlay;
   };
@@ -45,15 +45,19 @@
                       cargo-criterion
                       cargo-bloat
                       cargo-udeps
+                      delta
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib
                         libllvm
-                        (wrapBintoolsWith { inherit bintools; })
+                        (wrapBintoolsWith { bintools = bintools-unwrapped; })
                       ]
                     );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
+                # RUSTC_LOG = "rustc_codegen_ssa::back";
+                # RUSTFLAGS = "-Z gcc-ld=lld";
+                # RUSTFLAGS="-C link-arg=-fuse-ld=lld";
               };
         }
   );
