@@ -52,7 +52,7 @@ impl DokMatrix<f64> {
 pub struct IsNan;
 impl DokMatrix<f64> {
     // see (3.13) from Accuracy and stability of numerical algorithms by Higham
-    pub fn good_matrix_approx(&self, rhs: &Self, approx: &Self) -> Result<bool, IsNan> {
+    pub fn is_good_approx_of_mul(&self, lhs: &Self, rhs: &Self) -> Result<bool, IsNan> {
         let inf_norm = |m: &DokMatrix<f64>| {
             let mut max = 0.0;
             for rsum in (0..m.rows().get()).map(|r| {
@@ -69,23 +69,23 @@ impl DokMatrix<f64> {
             }
             Ok(max)
         };
-        let n = f64::value_from(self.rows().get().max(self.cols().get())).unwrap();
+        let n = f64::value_from(self.cols().get()).unwrap();
         let u = f64::EPSILON / 2.0;
         let gamma = n * u / (1.0 - n * u);
-        let expected = self * rhs;
-        if expected.iter().all(|(_, t)| !t.is_nan()) && approx.iter().any(|(_, t)| t.is_nan()) {
+        let expected = lhs * rhs;
+        if expected.iter().all(|(_, t)| !t.is_nan()) && self.iter().any(|(_, t)| t.is_nan()) {
             Ok(false)
         } else {
-            let self_norm = inf_norm(self)?;
+            let lhs_norm = inf_norm(lhs)?;
             let rhs_norm = inf_norm(rhs)?;
-            Ok(inf_norm(&(expected - approx.clone()))?
+            Ok(inf_norm(&(expected - self.clone()))?
                 <= 2.0
                     * gamma
-                    * if self_norm == 0.0 || rhs_norm == 0.0 {
+                    * if lhs_norm == 0.0 || rhs_norm == 0.0 {
                         // don't want 0.0*inf to become NaN
                         0.0
                     } else {
-                        self_norm * rhs_norm
+                        lhs_norm * rhs_norm
                     })
         }
     }
