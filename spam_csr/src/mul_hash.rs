@@ -1,4 +1,4 @@
-use std::{convert::TryInto, mem::MaybeUninit, slice};
+use std::convert::TryInto;
 
 use itertools::Itertools;
 use num::{traits::NumAssign, Integer};
@@ -9,7 +9,7 @@ use crate::{checked_inclusive_scan, CsrMatrix};
 
 impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
     // based off pengdada/mtspgemmlib
-    // requires: rhs column indices must fit in a u32
+    // requires: rhs column indices be less than u32::MAX (1<<32 - 1)
     pub fn mul_hash<const B1: bool, const B2: bool>(
         &self,
         rhs: &CsrMatrix<T, B1>,
@@ -122,20 +122,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
         let nnz = *offsets.last().unwrap();
         let (mut indices, mut vals) = (Vec::with_capacity(nnz), Vec::with_capacity(nnz));
         rayon::scope(|s| {
-            // SAFETY: indices_rest is the allocated capacity of indices
-            // SAFETY: vals_rest is the allocated capacity of vals
-            let (mut indices_rest, mut vals_rest) = unsafe {
-                (
-                    slice::from_raw_parts_mut(
-                        indices.as_mut_ptr() as *mut MaybeUninit<usize>,
-                        indices.capacity(),
-                    ),
-                    slice::from_raw_parts_mut(
-                        vals.as_mut_ptr() as *mut MaybeUninit<T>,
-                        vals.capacity(),
-                    ),
-                )
-            };
+            let (mut indices_rest, mut vals_rest) =
+                (indices.spare_capacity_mut(), vals.spare_capacity_mut());
             for (tlo, thi) in rows_offset.iter().copied().tuple_windows() {
                 let trow_nz = &row_nz[tlo..thi];
                 let (tindices, s2) = indices_rest.split_at_mut(offsets[thi] - offsets[tlo]);
@@ -200,8 +188,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                                 // SAFETY: tindices of each thread are disjoint slices of indices
                                 // SAFETY: tvals of each thread are disjoint slices of vals
                                 unsafe {
-                                    tindices[curr].as_mut_ptr().write(c.try_into().unwrap());
-                                    tvals[curr].as_mut_ptr().write(t);
+                                    tindices[curr].write(c.try_into().unwrap());
+                                    tvals[curr].write(t);
                                 }
                                 curr += 1;
                             }
@@ -210,8 +198,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                                 // SAFETY: tindices of each thread are disjoint slices of indices
                                 // SAFETY: tvals of each thread are disjoint slices of vals
                                 unsafe {
-                                    tindices[curr].as_mut_ptr().write(c.try_into().unwrap());
-                                    tvals[curr].as_mut_ptr().write(t);
+                                    tindices[curr].write(c.try_into().unwrap());
+                                    tvals[curr].write(t);
                                 }
                                 curr += 1;
                             }

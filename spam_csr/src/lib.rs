@@ -1,5 +1,6 @@
 #![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
+#![feature(vec_spare_capacity)]
 #![deny(clippy::disallowed_method)]
 
 #[cfg(feature = "test")]
