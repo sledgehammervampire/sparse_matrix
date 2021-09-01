@@ -73,6 +73,7 @@ where
     // size_of::<Option<(NonZeroU8,u32,f64)>> == 16 while size_of::<Option<(u32,f64)>> == 24
     slots: Vec<Option<(NonZeroU8, K, V)>, A>,
     capacity: usize,
+    items: usize,
 }
 
 impl<V: Copy> HashMap<u32, V> {
@@ -86,8 +87,13 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
         debug_assert!(capacity.is_power_of_two());
         let mut slots = Vec::with_capacity_in(capacity, alloc);
         slots.resize(capacity, None);
-        Self { slots, capacity }
+        Self {
+            slots,
+            capacity,
+            items: 0,
+        }
     }
+    // required: self.len() == 0
     pub fn shrink_to(&mut self, capacity: usize) {
         debug_assert!(capacity.is_power_of_two());
         debug_assert!(capacity <= self.slots.len());
@@ -102,21 +108,28 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
                 Some((_, k, _)) if k == key => {
                     break Entry::Occupied(&mut self.slots[hash].as_mut().unwrap().2)
                 }
-                None => break Entry::Vacant(key, &mut self.slots[hash]),
+                None => break Entry::Vacant(key, &mut self.slots[hash], &mut self.items),
                 Some(_) => hash = (hash + 1) & (self.capacity - 1),
             }
         }
     }
     pub fn drain(&mut self) -> impl Iterator<Item = (u32, V)> + '_ {
-        self.slots[..self.capacity]
-            .iter_mut()
-            .filter_map(|e| e.take().map(|(_, k, v)| (k, v)))
+        let items = &mut self.items;
+        self.slots[..self.capacity].iter_mut().filter_map(move |e| {
+            e.take().map(|(_, k, v)| {
+                *items -= 1;
+                (k, v)
+            })
+        })
+    }
+    pub fn len(&self) -> usize {
+        self.items
     }
 }
 
 pub enum Entry<'a, K, V> {
     Occupied(&'a mut V),
-    Vacant(K, &'a mut Option<(NonZeroU8, K, V)>),
+    Vacant(K, &'a mut Option<(NonZeroU8, K, V)>, &'a mut usize),
 }
 
 impl<'a, K, V> Entry<'a, K, V> {
@@ -129,8 +142,9 @@ impl<'a, K, V> Entry<'a, K, V> {
     pub fn or_insert(self, v: V) -> &'a mut V {
         match self {
             Entry::Occupied(v) => v,
-            Entry::Vacant(k, slot) => {
+            Entry::Vacant(k, slot, items) => {
                 *slot = Some((NonZeroU8::new(1).unwrap(), k, v));
+                *items += 1;
                 slot.as_mut().map(|e| &mut e.2).unwrap()
             }
         }
