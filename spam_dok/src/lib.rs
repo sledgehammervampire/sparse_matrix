@@ -43,7 +43,7 @@ impl DokMatrix<f64> {
                 .map(|((i, j), t)| format!("({}, {}, {:e})", i, j, t))
                 .join(", "),
         );
-        s.push_str("}");
+        s.push('}');
         s
     }
 }

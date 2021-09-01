@@ -114,16 +114,18 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
         }
     }
     pub fn drain(&mut self) -> impl Iterator<Item = (u32, V)> + '_ {
-        let items = &mut self.items;
-        self.slots[..self.capacity].iter_mut().filter_map(move |e| {
+        self.slots[..self.capacity].iter_mut().filter_map(|e| {
             e.take().map(|(_, k, v)| {
-                *items -= 1;
+                self.items -= 1;
                 (k, v)
             })
         })
     }
     pub fn len(&self) -> usize {
         self.items
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
