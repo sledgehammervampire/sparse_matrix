@@ -1,12 +1,13 @@
 #![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(vec_spare_capacity)]
+#![feature(int_roundings)]
 #![deny(clippy::disallowed_method)]
 
 #[cfg(feature = "test")]
 use cap_rand::prelude::*;
 use itertools::{iproduct, Itertools};
-use num::{traits::NumAssign, Num};
+use num_traits::{Num, NumAssign};
 use spam_dok::DokMatrix;
 use spam_matrix::{IndexError, Matrix};
 use std::{
@@ -391,7 +392,7 @@ macro_rules! gen_bench_mul {
         fn bench_mul<const OUTPUT_SORTED: bool>(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
             use cap_std::fs::DirEntry;
             use criterion::Criterion;
-            use num::traits::NumAssign;
+            use num_traits::NumAssign;
             use spam_csr::CsrMatrix;
             use spam_dok::{parse_matrix_market, DokMatrix, MatrixType};
             use std::io::Read;

@@ -6,7 +6,8 @@ use derive_more::{
 };
 #[cfg(feature = "mkl")]
 use mkl_sys::MKL_Complex16;
-use num::{traits::NumAssign, Complex, Num, One, Zero};
+use num_complex::Complex;
+use num_traits::{Num, NumAssign, One, Zero};
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 

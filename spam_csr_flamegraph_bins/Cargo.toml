@@ -1,5 +1,3 @@
-cargo-features = ["edition2021"]
-
 [package]
 name = "spam_csr_flamegraph_bins"
 version = "0.1.0"
@@ -15,9 +13,9 @@ spam_dok = { path = "../spam_dok" }
 spam_csr = { path = "../spam_csr" }
 spam_matrix = { path = "../spam_matrix" }
 open-ambient = "0.0.1"
-num = "0.4.0"
 anyhow = "1.0.43"
 cap-std = "0.17.0"
+num-traits = "0.2.14"
 
 [profile.release]
 debug = true

@@ -1,5 +1,5 @@
 use crate::{into_float_matrix_market, parse_matrix_market, DokMatrix, MatrixType};
-use num::Num;
+use num_traits::Num;
 use proptest::{prelude::*, test_runner::TestRunner};
 use spam_matrix::{
     proptest::{arb_add_pair, arb_mul_pair},

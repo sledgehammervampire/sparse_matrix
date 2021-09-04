@@ -6,7 +6,8 @@ use cmplx::ComplexNewtype;
 use conv::prelude::*;
 use itertools::Itertools;
 use nom::{Finish, IResult};
-use num::{traits::NumAssign, Num};
+use num_integer::Integer;
+use num_traits::{Num, NumAssign};
 #[cfg(feature = "proptest-arbitrary")]
 use proptest::prelude::*;
 #[cfg(test)]
@@ -278,7 +279,7 @@ pub enum FromMatrixMarketError {
     HasZeroDimension,
 }
 
-pub fn parse_matrix_market<I: FromStr + num::Integer + Clone, F: FromStr + NumAssign + Clone>(
+pub fn parse_matrix_market<I: FromStr + Integer + Clone, F: FromStr + NumAssign + Clone>(
     input: &str,
 ) -> Result<MatrixType<I, F>, FromMatrixMarketError> {
     enum EntryType<I, F: NumAssign + Clone> {
@@ -436,7 +437,7 @@ pub fn parse_matrix_market<I: FromStr + num::Integer + Clone, F: FromStr + NumAs
                             line_ending,
                         )),
                         |(r, _, c, _, re, _, im, _)| {
-                            (r, c, ComplexNewtype(num::complex::Complex { re, im }))
+                            (r, c, ComplexNewtype(num_complex::Complex { re, im }))
                         },
                     ),
                     BTreeMap::new,
@@ -478,7 +479,7 @@ pub fn parse_matrix_market<I: FromStr + num::Integer + Clone, F: FromStr + NumAs
     }
 }
 
-pub fn into_float_matrix_market<F: num::Float + std::fmt::Display, W: std::fmt::Write>(
+pub fn into_float_matrix_market<F: num_traits::Float + std::fmt::Display, W: std::fmt::Write>(
     m: DokMatrix<F>,
     w: &mut W,
 ) -> Result<(), std::fmt::Error> {

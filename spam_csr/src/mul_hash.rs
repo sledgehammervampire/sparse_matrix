@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use itertools::Itertools;
-use num::{traits::NumAssign, Integer};
+use num_traits::NumAssign;
 use rayon::prelude::*;
 use spam_matrix::Matrix;
 
@@ -44,7 +44,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
         let total_intprod = ps_row_nz.last().copied().unwrap();
         // TODO: not sure what the equivalent of omp_get_max_threads is
         let tnum = num_cpus::get();
-        let average_intprod = total_intprod.div_ceil(&tnum);
+        let average_intprod = total_intprod.div_ceil(tnum);
         let mut rows_offset = vec![0];
         rows_offset.par_extend(
             (1..tnum)

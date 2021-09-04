@@ -2,7 +2,7 @@
 
 use cap_rand::{ambient_authority, prelude::*};
 use itertools::iproduct;
-use num::Num;
+use num_traits::Num;
 use open_ambient::open_ambient_dir;
 use proptest::{prelude::*, test_runner::TestRunner};
 use spam_dok::{parse_matrix_market, DokMatrix, MatrixType};
