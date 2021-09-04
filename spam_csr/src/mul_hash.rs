@@ -66,13 +66,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                 let (s1, s2) = rest.split_at_mut(thi - tlo);
                 rest = s2;
                 s.spawn(move |_| {
-                    let max_capacity = s1
-                        .iter()
-                        .copied()
-                        .max()
-                        .unwrap_or(0)
-                        .checked_next_power_of_two()
-                        .expect("next power of 2 doesn't fit a usize");
+                    let max_capacity = s1.iter().copied().max().unwrap_or(0);
                     let mut hs = linprobe::HashSet::with_capacity(max_capacity);
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
@@ -87,10 +81,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         // less than row_nz without multiplying by 2, so we
                         // don't multiply by 2 here, which would make the
                         // benchmarks slower
-                        let capacity = row_nz
-                            .checked_next_power_of_two()
-                            .expect("next power of 2 doesn't fit a usize");
-                        hs.shrink_to(capacity);
+                        hs.shrink_to(*row_nz);
                         for &k in &self.indices[row_start..row_end] {
                             let (rlo, rhi) = (rhs.offsets[k], rhs.offsets[k + 1]);
                             for &j in &rhs.indices[rlo..rhi] {
@@ -138,10 +129,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         .copied()
                         .max()
                         .unwrap_or(0)
-                        .checked_next_power_of_two()
-                        .expect("next power of 2 doesn't fit a usize")
-                        .checked_shl(1)
-                        .expect("next power of 2 doesn't fit a usize");
+                        .checked_mul(2)
+                        .expect("multiplication by 2 overflowed");
                     let mut hm = linprobe::HashMap::with_capacity(capacity);
                     let mut curr = 0;
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
@@ -157,10 +146,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         // so we multiply by 2 to lower the load factor. this
                         // makes benchmarks faster
                         let capacity = row_nz
-                            .checked_next_power_of_two()
-                            .expect("next power of 2 doesn't fit a usize")
-                            .checked_shl(1)
-                            .expect("next power of 2 doesn't fit a usize");
+                            .checked_mul(2)
+                            .expect("multiplication by 2 overflowed");
                         hm.shrink_to(capacity);
                         for (k, &t) in self.indices[row_start..row_end]
                             .iter()

@@ -22,7 +22,9 @@ impl HashSet {
 }
 impl<A: Allocator> HashSet<A> {
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
-        debug_assert!(capacity.is_power_of_two());
+        let capacity = capacity
+            .checked_next_power_of_two()
+            .expect("next power of 2 doesn't fit a usize");
         let mut slots = Vec::with_capacity_in(capacity, alloc);
         slots.resize(capacity, u32::MAX);
         Self {
@@ -32,7 +34,9 @@ impl<A: Allocator> HashSet<A> {
         }
     }
     pub fn shrink_to(&mut self, capacity: usize) {
-        debug_assert!(capacity.is_power_of_two());
+        let capacity = capacity
+            .checked_next_power_of_two()
+            .expect("next power of 2 doesn't fit in a usize");
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
@@ -82,13 +86,17 @@ impl<V: Copy> HashMap<u32, V> {
 
 impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
-        debug_assert!(capacity.is_power_of_two());
+        let capacity = capacity
+            .checked_next_power_of_two()
+            .expect("next power of 2 doesn't fit a usize");
         let mut slots = Vec::with_capacity_in(capacity, alloc);
         slots.resize(capacity, None);
         Self { slots, capacity }
     }
     pub fn shrink_to(&mut self, capacity: usize) {
-        debug_assert!(capacity.is_power_of_two());
+        let capacity = capacity
+            .checked_next_power_of_two()
+            .expect("next power of 2 doesn't fit in a usize");
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
