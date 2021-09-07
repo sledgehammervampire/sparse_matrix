@@ -3,13 +3,13 @@ use open_ambient::open_ambient_dir;
 use spam_csr::{CsrMatrix, gen_mul_main};
 use spam_dok::DokMatrix;
 
-const ITERS: usize = 100;
+const ITERS: usize = 10;
 
 gen_mul_main!(mul_hash);
 
 fn main() -> anyhow::Result<()> {
     let dir = open_ambient_dir!("../matrices")?;
-    mul_main(dir)?;
+    mul_main(&dir)?;
     Ok(())
 }
 

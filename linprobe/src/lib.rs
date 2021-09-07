@@ -41,8 +41,9 @@ impl<A: Allocator> HashSet<A> {
         self.capacity = capacity;
     }
     pub fn insert(&mut self, key: u32) {
-        debug_assert!(key != u32::MAX);
         const HASH_SCAL: usize = 107;
+
+        debug_assert!(key != u32::MAX);
         let mut hash = (usize::try_from(key).unwrap() * HASH_SCAL) & (self.capacity - 1);
         loop {
             let curr = &mut self.slots[hash];
@@ -101,8 +102,9 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
         self.capacity = capacity;
     }
     pub fn entry(&mut self, key: u32) -> Entry<'_, u32, V> {
-        debug_assert!(key != u32::MAX);
         const HASH_SCAL: usize = 107;
+
+        debug_assert!(key != u32::MAX);
         let mut hash = (usize::try_from(key).unwrap() * HASH_SCAL) & (self.capacity - 1);
         loop {
             match self.slots[hash] {

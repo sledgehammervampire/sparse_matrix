@@ -10,11 +10,11 @@ use std::{convert::TryFrom, io::Read};
 
 pub fn main() -> anyhow::Result<()> {
     let dir = open_ambient_dir!("../matrices")?;
-    bench_mul(dir)?;
+    bench_mul(&dir)?;
     Ok(())
 }
 
-fn bench_mul(dir: Dir) -> anyhow::Result<()> {
+fn bench_mul(dir: &Dir) -> anyhow::Result<()> {
     let mut criterion = Criterion::default().configure_from_args();
     for entry in dir.entries()? {
         let entry = entry?;
@@ -28,7 +28,7 @@ fn bench_mul(dir: Dir) -> anyhow::Result<()> {
                 let m = RustMklSparseMatrix::try_from(&mut m).unwrap();
                 criterion.bench_function(&format!("bench mkl_spmm {:?}", entry.file_name()), |b| {
                     b.iter(|| {
-                        let _ = &m * &m;
+                        drop(&m * &m);
                     });
                 });
             }
@@ -38,7 +38,7 @@ fn bench_mul(dir: Dir) -> anyhow::Result<()> {
                 let m = RustMklSparseMatrix::try_from(&mut m).unwrap();
                 criterion.bench_function(&format!("bench mkl_spmm {:?}", entry.file_name()), |b| {
                     b.iter(|| {
-                        let _ = &m * &m;
+                        drop(&m * &m);
                     });
                 });
             }

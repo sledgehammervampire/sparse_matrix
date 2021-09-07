@@ -379,7 +379,7 @@ impl<T, const B: bool> IntoIterator for CsrMatrix<T, B> {
 impl<T: Num, const IS_SORTED: bool> From<CsrMatrix<T, IS_SORTED>> for DokMatrix<T> {
     fn from(old: CsrMatrix<T, IS_SORTED>) -> Self {
         let mut m = DokMatrix::new((old.rows(), old.cols()));
-        for (i, t) in old.into_iter() {
+        for (i, t) in old {
             m.set_element(i, t).unwrap();
         }
         m
@@ -439,7 +439,7 @@ macro_rules! gen_bench_mul {
 #[macro_export]
 macro_rules! gen_mul_main {
     ($f:ident) => {
-        fn mul_main(dir: cap_std::fs::Dir) -> anyhow::Result<()> {
+        fn mul_main(dir: &cap_std::fs::Dir) -> anyhow::Result<()> {
             use spam_dok::{parse_matrix_market, MatrixType};
             use std::io::Read;
 
