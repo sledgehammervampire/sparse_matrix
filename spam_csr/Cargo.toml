@@ -8,6 +8,7 @@ edition = "2021"
 default = []
 mkl = ["mkl-sys", "num_enum", "cmplx", "cmplx/mkl", "thiserror"]
 test = ["cap-rand"]
+debug = ["linprobe/debug"]
 
 [dependencies]
 cmplx = { path = "../cmplx", optional = true }

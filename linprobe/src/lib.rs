@@ -1,10 +1,15 @@
 #![feature(allocator_api)]
 #![deny(clippy::disallowed_method)]
 
+#[cfg(feature = "debug")]
+use std::collections::BTreeMap;
 use std::{
     alloc::{Allocator, Global},
     num::NonZeroU8,
 };
+
+const HASH_SCAL: usize = 107;
+const MIN_TABLE_SIZE: usize = 16;
 
 pub struct HashSet<A = Global>
 where
@@ -13,6 +18,8 @@ where
     slots: Vec<u32, A>,
     capacity: usize,
     items: usize,
+    #[cfg(feature = "debug")]
+    pub probe_lengths: BTreeMap<usize, usize>,
 }
 
 impl HashSet {
@@ -24,36 +31,52 @@ impl<A: Allocator> HashSet<A> {
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         let capacity = capacity
             .checked_next_power_of_two()
-            .expect("next power of 2 doesn't fit a usize");
+            .expect("next power of 2 doesn't fit a usize")
+            .max(MIN_TABLE_SIZE);
         let mut slots = Vec::with_capacity_in(capacity, alloc);
         slots.resize(capacity, u32::MAX);
         Self {
             slots,
             capacity,
             items: 0,
+            #[cfg(feature = "debug")]
+            probe_lengths: BTreeMap::new(),
         }
     }
     pub fn shrink_to(&mut self, capacity: usize) {
         let capacity = capacity
             .checked_next_power_of_two()
-            .expect("next power of 2 doesn't fit in a usize");
+            .expect("next power of 2 doesn't fit in a usize")
+            .max(MIN_TABLE_SIZE);
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
     pub fn insert(&mut self, key: u32) {
-        const HASH_SCAL: usize = 107;
-
         debug_assert!(key != u32::MAX);
-        let mut hash = (usize::try_from(key).unwrap() * HASH_SCAL) & (self.capacity - 1);
+        let mut hash = usize::try_from(key).unwrap().wrapping_mul(HASH_SCAL) & (self.capacity - 1);
+        #[cfg(feature = "debug")]
+        let mut probes = 0;
         loop {
             let curr = &mut self.slots[hash];
             if *curr == key {
+                #[cfg(feature = "debug")]
+                {
+                    *self.probe_lengths.entry(probes).or_insert(0) += 1;
+                }
                 break;
             } else if *curr == u32::MAX {
+                #[cfg(feature = "debug")]
+                {
+                    *self.probe_lengths.entry(probes).or_insert(0) += 1;
+                }
                 *curr = key;
                 self.items += 1;
                 break;
             } else {
+                #[cfg(feature = "debug")]
+                {
+                    probes += 1;
+                }
                 hash = (hash + 1) & (self.capacity - 1);
             }
         }
@@ -77,6 +100,8 @@ where
     // size_of::<Option<(NonZeroU8,u32,f64)>> == 16 while size_of::<Option<(u32,f64)>> == 24
     slots: Vec<Option<(NonZeroU8, K, V)>, A>,
     capacity: usize,
+    #[cfg(feature = "debug")]
+    pub probe_lengths: BTreeMap<usize, usize>,
 }
 
 impl<V: Copy> HashMap<u32, V> {
@@ -89,30 +114,53 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         let capacity = capacity
             .checked_next_power_of_two()
-            .expect("next power of 2 doesn't fit a usize");
+            .expect("next power of 2 doesn't fit a usize")
+            .max(MIN_TABLE_SIZE);
         let mut slots = Vec::with_capacity_in(capacity, alloc);
         slots.resize(capacity, None);
-        Self { slots, capacity }
+        Self {
+            slots,
+            capacity,
+            #[cfg(feature = "debug")]
+            probe_lengths: BTreeMap::new(),
+        }
     }
     pub fn shrink_to(&mut self, capacity: usize) {
         let capacity = capacity
             .checked_next_power_of_two()
-            .expect("next power of 2 doesn't fit in a usize");
+            .expect("next power of 2 doesn't fit in a usize")
+            .max(MIN_TABLE_SIZE);
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;
     }
     pub fn entry(&mut self, key: u32) -> Entry<'_, u32, V> {
-        const HASH_SCAL: usize = 107;
-
         debug_assert!(key != u32::MAX);
-        let mut hash = (usize::try_from(key).unwrap() * HASH_SCAL) & (self.capacity - 1);
+        let mut hash = usize::try_from(key).unwrap().wrapping_mul(HASH_SCAL) & (self.capacity - 1);
+        #[cfg(feature = "debug")]
+        let mut probes = 0;
         loop {
             match self.slots[hash] {
                 Some((_, k, _)) if k == key => {
-                    break Entry::Occupied(&mut self.slots[hash].as_mut().unwrap().2)
+                    #[cfg(feature = "debug")]
+                    {
+                        *self.probe_lengths.entry(probes).or_insert(0) += 1;
+                    }
+                    break Entry::Occupied(&mut self.slots[hash].as_mut().unwrap().2);
                 }
-                None => break Entry::Vacant(key, &mut self.slots[hash]),
-                Some(_) => hash = (hash + 1) & (self.capacity - 1),
+                None => {
+                    #[cfg(feature = "debug")]
+                    {
+                        *self.probe_lengths.entry(probes).or_insert(0) += 1;
+                    }
+                    break Entry::Vacant(key, &mut self.slots[hash]);
+                }
+                Some(_) => {
+                    #[cfg(feature = "debug")]
+                    {
+                        probes += 1;
+                    }
+                    hash = (hash + 1) & (self.capacity - 1)
+                }
             }
         }
     }

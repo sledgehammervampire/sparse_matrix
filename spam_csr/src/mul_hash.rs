@@ -92,6 +92,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         *row_nz = hs.len();
                         hs.clear();
                     }
+                    #[cfg(feature = "debug")]
+                    dbg!(&hs.probe_lengths);
                 });
             }
         });
@@ -192,6 +194,8 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                             }
                         }
                     }
+                    #[cfg(feature = "debug")]
+                    dbg!(&hm.probe_lengths);
                     assert_eq!(curr, offsets[thi] - offsets[tlo]);
                 });
             }
