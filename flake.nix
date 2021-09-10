@@ -46,18 +46,20 @@
                       cargo-bloat
                       cargo-udeps
                       delta
+                      (wrapBintoolsWith { bintools = llvmPackages_latest.bintools-unwrapped; })
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib
                         libllvm
-                        (wrapBintoolsWith { bintools = bintools-unwrapped; })
                       ]
                     );
                 MKLROOT = "${mkl}";
                 LIBCLANG_PATH = "${llvmPackages_latest.clang-unwrapped.lib}/lib";
-                # RUSTC_LOG = "rustc_codegen_ssa::back";
+                RUSTFLAGS = "-Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--no-as-needed -Clink-arg=-Wl,-lmkl_intel_ilp64 -Clink-arg=-Wl,-lmkl_intel_thread -Clink-arg=-Wl,-lmkl_core -Clink-arg=-Wl,-liomp5 -Clink-arg=-Wl,--as-needed";
+                # RUSTC_LOG = "rustc_codegen_ssa::back::link=debug";
+                # RUSTFLAGS = "-C link-arg=-Wl,--verbose";
                 # RUSTFLAGS = "-Z gcc-ld=lld";
-                # RUSTFLAGS="-C link-arg=-fuse-ld=lld";
+                # LD_DEBUG = "all";
               };
         }
   );

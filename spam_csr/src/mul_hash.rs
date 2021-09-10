@@ -15,7 +15,15 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
         rhs: &CsrMatrix<T, B1>,
     ) -> CsrMatrix<T, B2> {
         let (mut row_nz, rows_offset) = self.rows_to_threads(rhs);
+        #[cfg(feature = "debug")]
+        {
+            dbg!(&row_nz);
+        }
         Self::mul_hash_symbolic(self, rhs, &mut row_nz, &rows_offset);
+        #[cfg(feature = "debug")]
+        {
+            dbg!(&row_nz);
+        }
         let (indices, vals, offsets) =
             unsafe { Self::mul_hash_numeric::<B1, B2>(self, rhs, &row_nz, &rows_offset) };
         CsrMatrix {

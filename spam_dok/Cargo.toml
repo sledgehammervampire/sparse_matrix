@@ -23,5 +23,4 @@ num-integer = "0.1.44"
 [dev-dependencies]
 proptest = "1.0.0"
 spam_matrix = { path = "../spam_matrix", features = ["proptest"] }
-fuzzcheck = "0.7.4"
 serde = { version = "1.0.129", features = ["derive"] }
