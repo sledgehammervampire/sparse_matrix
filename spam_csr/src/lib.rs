@@ -416,6 +416,9 @@ macro_rules! gen_bench_mul {
             let mut criterion = Criterion::default().configure_from_args();
             for entry in dir.entries()? {
                 let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
                 let mut input = String::new();
                 entry.open()?.read_to_string(&mut input)?;
                 match parse_matrix_market::<i64, f64>(&input).unwrap() {
@@ -445,6 +448,9 @@ macro_rules! gen_mul_main {
 
             for entry in dir.entries()? {
                 let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
                 dbg!(entry.file_name());
                 let mut input = String::new();
                 entry.open()?.read_to_string(&mut input)?;

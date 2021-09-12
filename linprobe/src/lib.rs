@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::{
     alloc::{Allocator, Global},
+    mem,
     num::NonZeroU8,
 };
 
@@ -16,69 +17,90 @@ where
     A: Allocator,
 {
     slots: Vec<u32, A>,
-    capacity: usize,
+    upper_bound: usize,
     items: usize,
     #[cfg(feature = "debug")]
     pub probe_lengths: BTreeMap<usize, usize>,
 }
 
 impl HashSet {
+    pub fn new() -> Self {
+        HashSet::with_capacity(MIN_TABLE_SIZE / 4)
+    }
     pub fn with_capacity(capacity: usize) -> Self {
         HashSet::with_capacity_in(capacity, Global)
     }
 }
-impl<A: Allocator> HashSet<A> {
+impl<A: Allocator + Clone> HashSet<A> {
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
-        let capacity = capacity
+        let upper_bound = capacity
             .checked_next_power_of_two()
             .expect("next power of 2 doesn't fit a usize")
+            .checked_mul(2)
+            .expect("multiplication by 2 overflows a usize")
             .max(MIN_TABLE_SIZE);
-        let mut slots = Vec::with_capacity_in(capacity, alloc);
-        slots.resize(capacity, u32::MAX);
+        let mut slots = Vec::with_capacity_in(upper_bound, alloc);
+        slots.resize(upper_bound, u32::MAX);
         Self {
             slots,
-            capacity,
+            upper_bound,
             items: 0,
             #[cfg(feature = "debug")]
             probe_lengths: BTreeMap::new(),
         }
     }
     pub fn shrink_to(&mut self, capacity: usize) {
-        let capacity = capacity
+        debug_assert!(self.is_empty());
+        let upper_bound = capacity
             .checked_next_power_of_two()
             .expect("next power of 2 doesn't fit in a usize")
+            .checked_mul(2)
+            .expect("multiplication by 2 overflows a usize")
             .max(MIN_TABLE_SIZE);
-        debug_assert!(capacity <= self.slots.len());
-        self.capacity = capacity;
+        self.upper_bound = upper_bound.min(self.upper_bound);
     }
+    fn grow(&mut self) {
+        if self.upper_bound == self.slots.len() {
+            self.slots.resize(
+                self.slots
+                    .len()
+                    .checked_mul(2)
+                    .expect("multiplication by 2 overflows a usize"),
+                u32::MAX,
+            );
+        }
+        let mut keys = Vec::with_capacity_in(self.items, self.slots.allocator().clone());
+        keys.extend(
+            self.slots[..self.upper_bound]
+                .iter_mut()
+                .filter_map(|key| (*key != u32::MAX).then(|| mem::replace(key, u32::MAX))),
+        );
+        self.upper_bound = self
+            .upper_bound
+            .checked_mul(2)
+            .expect("multiplication by 2 overflows a usize");
+        for key in keys {
+            insert_raw(
+                &mut self.slots[..self.upper_bound],
+                key,
+                #[cfg(feature = "debug")]
+                &mut self.probe_lengths,
+            );
+        }
+    }
+    #[inline]
     pub fn insert(&mut self, key: u32) {
         debug_assert!(key != u32::MAX);
-        let mut hash = usize::try_from(key).unwrap().wrapping_mul(HASH_SCAL) & (self.capacity - 1);
-        #[cfg(feature = "debug")]
-        let mut probes = 0;
-        loop {
-            let curr = &mut self.slots[hash];
-            if *curr == key {
-                #[cfg(feature = "debug")]
-                {
-                    *self.probe_lengths.entry(probes).or_insert(0) += 1;
-                }
-                break;
-            } else if *curr == u32::MAX {
-                #[cfg(feature = "debug")]
-                {
-                    *self.probe_lengths.entry(probes).or_insert(0) += 1;
-                }
-                *curr = key;
-                self.items += 1;
-                break;
-            } else {
-                #[cfg(feature = "debug")]
-                {
-                    probes += 1;
-                }
-                hash = (hash + 1) & (self.capacity - 1);
-            }
+        if insert_raw(
+            &mut self.slots[..self.upper_bound],
+            key,
+            #[cfg(feature = "debug")]
+            &mut self.probe_lengths,
+        ) {
+            self.items += 1;
+        }
+        if self.items > self.upper_bound / 2 {
+            self.grow();
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -88,8 +110,48 @@ impl<A: Allocator> HashSet<A> {
         self.items
     }
     pub fn clear(&mut self) {
-        self.slots[..self.capacity].fill(u32::MAX);
+        self.slots[..self.upper_bound].fill(u32::MAX);
         self.items = 0;
+    }
+}
+
+#[inline]
+fn insert_raw(
+    slots: &mut [u32],
+    key: u32,
+    #[cfg(feature = "debug")] probe_lengths: &mut BTreeMap<usize, usize>,
+) -> bool {
+    let mut index = usize::try_from(key).unwrap().wrapping_mul(HASH_SCAL) & (slots.len() - 1);
+    #[cfg(feature = "debug")]
+    let mut probes = 0;
+    loop {
+        let curr = &mut slots[index];
+        if *curr == key {
+            #[cfg(feature = "debug")]
+            {
+                *probe_lengths.entry(probes).or_insert(0) += 1;
+            }
+            break false;
+        } else if *curr == u32::MAX {
+            #[cfg(feature = "debug")]
+            {
+                *probe_lengths.entry(probes).or_insert(0) += 1;
+            }
+            *curr = key;
+            break true;
+        } else {
+            #[cfg(feature = "debug")]
+            {
+                probes += 1;
+            }
+            index = (index + 1) & (slots.len() - 1);
+        }
+    }
+}
+
+impl Default for HashSet {
+    fn default() -> Self {
+        HashSet::new()
     }
 }
 
@@ -115,6 +177,8 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
         let capacity = capacity
             .checked_next_power_of_two()
             .expect("next power of 2 doesn't fit a usize")
+            .checked_mul(2)
+            .expect("multiplication by 2 overflows a usize")
             .max(MIN_TABLE_SIZE);
         let mut slots = Vec::with_capacity_in(capacity, alloc);
         slots.resize(capacity, None);
@@ -129,6 +193,8 @@ impl<V: Copy, A: Allocator> HashMap<u32, V, A> {
         let capacity = capacity
             .checked_next_power_of_two()
             .expect("next power of 2 doesn't fit in a usize")
+            .checked_mul(2)
+            .expect("multiplication by 2 overflows a usize")
             .max(MIN_TABLE_SIZE);
         debug_assert!(capacity <= self.slots.len());
         self.capacity = capacity;

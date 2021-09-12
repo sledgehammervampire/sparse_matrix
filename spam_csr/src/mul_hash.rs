@@ -74,8 +74,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                 let (s1, s2) = rest.split_at_mut(thi - tlo);
                 rest = s2;
                 s.spawn(move |_| {
-                    let max_capacity = s1.iter().copied().max().unwrap_or(0);
-                    let mut hs = linprobe::HashSet::with_capacity(max_capacity);
+                    let mut hs = linprobe::HashSet::new();
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
                         .iter()
                         .copied()
@@ -85,10 +84,6 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         if *row_nz == 0 {
                             continue;
                         }
-                        // the number of distinct keys inserted is likely much
-                        // less than row_nz without multiplying by 2, so we
-                        // don't multiply by 2 here, which would make the
-                        // benchmarks slower
                         hs.shrink_to(*row_nz);
                         for &k in &self.indices[row_start..row_end] {
                             let (rlo, rhi) = (rhs.offsets[k], rhs.offsets[k + 1]);
@@ -134,13 +129,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                 let offsets = &offsets;
                 s.spawn(move |_| {
                     // maximum of per row capacity
-                    let capacity = trow_nz
-                        .iter()
-                        .copied()
-                        .max()
-                        .unwrap_or(0)
-                        .checked_mul(2)
-                        .expect("multiplication by 2 overflowed");
+                    let capacity = trow_nz.iter().copied().max().unwrap_or(0);
                     let mut hm = linprobe::HashMap::with_capacity(capacity);
                     let mut curr = 0;
                     for ((row_start, row_end), row_nz) in self.offsets[tlo..=thi]
@@ -152,13 +141,7 @@ impl<T: NumAssign + Copy + Send + Sync, const B: bool> CsrMatrix<T, B> {
                         if *row_nz == 0 {
                             continue;
                         }
-                        // row_nz could be close to row_nz.next_power_of_two(),
-                        // so we multiply by 2 to lower the load factor. this
-                        // makes benchmarks faster
-                        let capacity = row_nz
-                            .checked_mul(2)
-                            .expect("multiplication by 2 overflowed");
-                        hm.shrink_to(capacity);
+                        hm.shrink_to(*row_nz);
                         for (k, &t) in self.indices[row_start..row_end]
                             .iter()
                             .copied()

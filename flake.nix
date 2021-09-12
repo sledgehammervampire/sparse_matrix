@@ -44,7 +44,6 @@
                       cargo-geiger
                       cargo-criterion
                       cargo-bloat
-                      cargo-udeps
                       delta
                       (wrapBintoolsWith { bintools = llvmPackages_latest.bintools-unwrapped; })
                     ] ++ (
