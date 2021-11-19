@@ -20,17 +20,17 @@ rayon = "1.5.1"
 num_cpus = "1.13.0"
 mkl-sys = { git = "https://github.com/Andlon/mkl-sys", version = "0.1.0", optional = true, features = ["all", "openmp", "ilp64"] }
 num_enum = { version = "0.5.4", optional = true }
-thiserror = { version = "1.0.26", optional = true }
-cap-rand = { version = "0.17.0", optional = true }
+thiserror = { version = "1.0.30", optional = true }
+cap-rand = { version = "0.21.1", optional = true }
 num-traits = "0.2.14"
 
 [dev-dependencies]
-cap-rand = "0.17.0"
-cap-std = "0.17.0"
+cap-rand = "0.21.1"
+cap-std = "0.21.1"
 proptest = "1.0.0"
 spam_dok = { path = "../spam_dok", features = ["proptest-arbitrary"] }
 cmplx = { path = "../cmplx", features = ["proptest"] }
-anyhow = "1.0.43"
+anyhow = "1.0.45"
 criterion = "0.3.5"
 open-ambient = "0.0.1"
 spam_csr = { path = ".", features = ["test"] }

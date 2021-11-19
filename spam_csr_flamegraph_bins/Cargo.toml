@@ -15,7 +15,7 @@ spam_csr = { path = "../spam_csr" }
 spam_matrix = { path = "../spam_matrix" }
 open-ambient = "0.0.1"
 anyhow = "1.0.43"
-cap-std = "0.17.0"
+cap-std = "0.21.1"
 num-traits = "0.2.14"
 
 [profile.release]

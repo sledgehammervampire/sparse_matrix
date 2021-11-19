@@ -37,6 +37,7 @@ disallowed-methods = [
   "std::fs::set_permissions",
   "std::fs::soft_link",
   "std::fs::symlink_metadata",
+  "std::fs::try_exists",
   "std::fs::write",
   "std::fs::DirBuilder::create",
   "std::fs::File::open",
@@ -48,6 +49,7 @@ disallowed-methods = [
   "std::path::Path::read_link",
   "std::path::Path::read_dir",
   "std::path::Path::exists",
+  "std::path::Path::try_exists",
   "std::path::Path::is_file",
   "std::path::Path::is_dir",
   "std::time::Instant::now",
@@ -65,6 +67,17 @@ disallowed-methods = [
   "std::os::unix::net::UnixDatagram::connect",
   "std::os::unix::net::UnixDatagram::send_to",
   "std::os::unix::net::UnixDatagram::send_vectored_with_ancillary_to",
+
+  # Use cap-std instead; specifically, `cap_std::fs_utf8`.
+  "camino::Utf8Path::metadata",
+  "camino::Utf8Path::symlink_metadata",
+  "camino::Utf8Path::canonicalize",
+  "camino::Utf8Path::read_link",
+  "camino::Utf8Path::read_dir",
+  "camino::Utf8Path::exists",
+  "camino::Utf8Path::try_exists",
+  "camino::Utf8Path::is_file",
+  "camino::Utf8Path::is_dir",
 
   # No replacement available for these yet.
   "std::process::abort",
@@ -132,6 +145,7 @@ disallowed-methods = [
   "async_std::os::unix::net::UnixDatagram::send_vectored_with_ancillary_to",
 
   # Use cap-directories instead.
+  "std::env::home_dir",
   "directories_next::BaseDirs::new",
   "directories_next::ProjectDirs::from_path",
   "directories_next::ProjectDirs::from",
@@ -147,6 +161,7 @@ disallowed-methods = [
   "rand::random",
 
   # Use cap-tempfile instead.
+  "std::env::temp_dir",
   "tempfile::spooled_tempfile",
   "tempfile::tempdir",
   "tempfile::tempdir_in",

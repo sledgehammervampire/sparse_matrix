@@ -46,6 +46,8 @@
                       cargo-bloat
                       delta
                       (wrapBintoolsWith { bintools = llvmPackages_latest.bintools-unwrapped; })
+                      cargo-audit
+                      cargo-supply-chain
                     ] ++ (
                       with llvmPackages_latest; [
                         clang-unwrapped.lib
