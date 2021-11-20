@@ -1,6 +1,6 @@
 use num_traits::NumAssign;
 use open_ambient::open_ambient_dir;
-use spam_csr::{CsrMatrix, gen_mul_main};
+use spam_csr::{gen_mul_main, CsrMatrix};
 use spam_dok::DokMatrix;
 
 const ITERS: usize = 10;
