@@ -1,6 +1,7 @@
 [workspace]
 members = ["linprobe", "cmplx", "spam_matrix", "spam_dok", "spam_csr"]
 exclude = ["spam_csr_flamegraph_bins"]
+resolver = "2"
 
 [profile.dev.package.bindgen]
 opt-level = 3
