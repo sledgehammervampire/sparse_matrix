@@ -2,3 +2,7 @@
 members = ["linprobe", "spam_matrix", "spam_dok", "spam_csr"]
 exclude = ["spam_csr_flamegraph_bins"]
 resolver = "2"
+
+[profile.prof]
+inherits = "bench"
+debug = true
