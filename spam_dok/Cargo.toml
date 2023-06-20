@@ -9,7 +9,6 @@ edition = "2021"
 proptest-arbitrary = ["proptest", "spam_matrix/proptest"]
 
 [dependencies]
-cmplx = { path = "../cmplx" }
 spam_matrix = { path = "../spam_matrix" }
 itertools = "0.10.1"
 nom = "7.1.0"

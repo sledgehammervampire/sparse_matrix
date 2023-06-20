@@ -1,8 +1,7 @@
 #![feature(is_sorted)]
-#![feature(type_alias_impl_trait)]
-#![feature(vec_spare_capacity)]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(int_roundings)]
-#![deny(clippy::disallowed_method)]
+#![deny(clippy::disallowed_method, unsafe_op_in_unsafe_fn)]
 
 #[cfg(feature = "test")]
 use cap_rand::prelude::*;

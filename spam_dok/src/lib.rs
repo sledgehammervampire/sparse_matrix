@@ -1,11 +1,11 @@
-#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(test, feature(no_coverage))]
 #![deny(clippy::disallowed_method)]
 
-use cmplx::ComplexNewtype;
 use conv::prelude::*;
 use itertools::Itertools;
 use nom::{Finish, IResult};
+use num_complex::Complex;
 use num_integer::Integer;
 use num_traits::{Num, NumAssign};
 #[cfg(feature = "proptest-arbitrary")]
@@ -268,7 +268,7 @@ impl<T: Arbitrary + Num + Clone> DokMatrix<T> {
 pub enum MatrixType<I, F: NumAssign + Clone> {
     Integer(DokMatrix<I>),
     Real(DokMatrix<F>),
-    Complex(DokMatrix<ComplexNewtype<F>>),
+    Complex(DokMatrix<Complex<F>>),
 }
 
 #[derive(Error, Debug)]
@@ -285,7 +285,7 @@ pub fn parse_matrix_market<I: FromStr + Integer + Clone, F: FromStr + NumAssign 
     enum EntryType<I, F: NumAssign + Clone> {
         Integer(BTreeMap<(usize, usize), I>),
         Real(BTreeMap<(usize, usize), F>),
-        Complex(BTreeMap<(usize, usize), ComplexNewtype<F>>),
+        Complex(BTreeMap<(usize, usize), Complex<F>>),
     }
 
     fn inner<I: FromStr + Num + Clone, F: FromStr + NumAssign + Clone>(
@@ -436,9 +436,7 @@ pub fn parse_matrix_market<I: FromStr + Integer + Clone, F: FromStr + NumAssign 
                             map_res(recognize_float, str::parse),
                             line_ending,
                         )),
-                        |(r, _, c, _, re, _, im, _)| {
-                            (r, c, ComplexNewtype(num_complex::Complex { re, im }))
-                        },
+                        |(r, _, c, _, re, _, im, _)| (r, c, num_complex::Complex { re, im }),
                     ),
                     BTreeMap::new,
                     general,
