@@ -27,15 +27,10 @@ cap-std = "1.0.5"
 proptest = "1.0.0"
 spam_dok = { path = "../spam_dok", features = ["proptest-arbitrary"] }
 anyhow = "1.0.45"
-criterion = "0.3.5"
+criterion = "0.4.0"
 open-ambient = "0.3.0"
 spam_csr = { path = ".", features = ["test"] }
 
 [[bench]]
 name = "mul_hash"
 harness = false
-
-[[bench]]
-name = "mkl_spmm"
-harness = false
-required-features = ["mkl"]

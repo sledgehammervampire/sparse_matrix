@@ -17,12 +17,6 @@ use std::{
     iter::repeat_with,
     num::{NonZeroUsize, Wrapping},
 };
-#[cfg(feature = "mkl")]
-use {
-    crate::mkl::{MklCsrMatrix, RustMklSparseMatrix},
-    cmplx::ComplexNewtype,
-    std::convert::TryFrom,
-};
 
 use crate::CsrMatrix;
 
@@ -374,54 +368,6 @@ fn mul_hash() {
         },
         DokMatrix::from,
     );
-}
-
-#[cfg(feature = "mkl")]
-#[test]
-fn mkl_spmm_d() {
-    let mut runner = TestRunner::default();
-    runner
-        .run(
-            &arb_mul_pair(CsrMatrix::<f64, false>::arb_fixed_size_matrix),
-            |MulPair(m1, m2)| {
-                if let (Ok(mut m3), Ok(mut m4)) = (
-                    MklCsrMatrix::<f64, false>::try_from(m1),
-                    MklCsrMatrix::try_from(m2),
-                ) {
-                    let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
-                    let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
-                    let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
-                    prop_assert!(m5.invariants(), "{:?}", m5);
-                }
-                Ok(())
-            },
-        )
-        .unwrap();
-}
-
-#[cfg(feature = "mkl")]
-#[test]
-fn mkl_spmm_z() {
-    use mkl_sys::MKL_Complex16;
-
-    let mut runner = TestRunner::default();
-    runner
-        .run(
-            &arb_mul_pair(CsrMatrix::<ComplexNewtype<f64>, false>::arb_fixed_size_matrix),
-            |MulPair(m1, m2)| {
-                if let (Ok(mut m3), Ok(mut m4)) = (
-                    MklCsrMatrix::<MKL_Complex16, false>::try_from(m1),
-                    MklCsrMatrix::try_from(m2),
-                ) {
-                    let m3 = RustMklSparseMatrix::try_from(&mut m3).unwrap();
-                    let m4 = RustMklSparseMatrix::try_from(&mut m4).unwrap();
-                    let m5 = CsrMatrix::try_from((&m3 * &m4).unwrap()).unwrap();
-                    prop_assert!(m5.invariants(), "{:?}", m5);
-                }
-                Ok(())
-            },
-        )
-        .unwrap();
 }
 
 #[ignore = "expensive, parsing code not changed often"]

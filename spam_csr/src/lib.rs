@@ -18,8 +18,6 @@ use std::{
     vec,
 };
 
-#[cfg(feature = "mkl")]
-pub mod mkl;
 mod mul_hash;
 #[cfg(test)]
 mod tests;
